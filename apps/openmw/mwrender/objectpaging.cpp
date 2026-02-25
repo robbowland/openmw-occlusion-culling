@@ -478,9 +478,10 @@ namespace MWRender
     {
     }
 
-    void ObjectPaging::setOcclusionCuller(SceneUtil::OcclusionCuller* culler)
+    void ObjectPaging::setOcclusionCuller(SceneUtil::OcclusionCuller* culler, unsigned int maxTriangles)
     {
         mOcclusionCuller = culler;
+        mMaxTriangles = maxTriangles;
     }
 
     namespace
@@ -999,7 +1000,7 @@ namespace MWRender
             if (mOcclusionCuller)
             {
                 float maxDist = Settings::camera().mOcclusionOccluderMaxDistance;
-                group->addCullCallback(new PagedOccluderCallback(mOcclusionCuller, maxDist));
+                group->addCullCallback(new PagedOccluderCallback(mOcclusionCuller, maxDist, mMaxTriangles));
             }
         }
 
