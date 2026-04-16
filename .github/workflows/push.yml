@@ -1,15 +1,18 @@
-name: Build and test
+name: Build and Release
 
 on:
-- push
-- pull_request
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BUILD_TYPE: RelWithDebInfo
 
 jobs:
   Ubuntu:
-    runs-on: ubuntu-latest
+    runs-on: linux-16core
 
     steps:
     - uses: actions/checkout@v6
@@ -20,51 +23,36 @@ jobs:
     - name: Install Building Dependencies
       run: sudo CI/install_debian_deps.sh gcc openmw-deps openmw-deps-dynamic
 
+    - name: Install mold linker
+      run: sudo apt-get install -y mold
+
     - name: Prime ccache
       uses: hendrikmuhs/ccache-action@v1
       with:
-        key: ${{ matrix.os }}-${{ env.BUILD_TYPE }}
-        max-size: 1000M
+        key: ubuntu-${{ env.BUILD_TYPE }}
+        max-size: 2000M
 
     - name: Configure
       run: >
         cmake .
-        -D CMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -D CMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
         -D OPENMW_USE_SYSTEM_RECASTNAVIGATION=ON
         -D USE_SYSTEM_TINYXML=ON
-        -D BUILD_COMPONENTS_TESTS=ON
-        -D BUILD_OPENMW_TESTS=ON
-        -D BUILD_OPENCS_TESTS=ON
         -D CMAKE_INSTALL_PREFIX=install
+        -D CMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold
+        -D CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold
 
     - name: Build
       run: cmake --build . -- -j$(nproc)
 
-    - name: Run components tests
-      run: ./components-tests
+    - name: Package
+      run: bash CI/package-linux.sh . openmw-linux-x64
 
-    - name: Run OpenMW tests
-      run: ./openmw-tests
-
-    - name: Run OpenMW-CS tests
-      run: ./openmw-cs-tests
-
-    # - name: Install
-    #   shell: bash
-    #   run: cmake --install .
-
-    # - name: Create Artifact
-    #   shell: bash
-    #   working-directory: install
-    #   run: |
-    #     ls -laR
-    #     7z a ../build_artifact.7z .
-
-    # - name: Upload Artifact
-    #   uses: actions/upload-artifact@v1
-    #   with:
-    #     path: ./build_artifact.7z
-    #     name: build_artifact.7z
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: openmw-linux-${{ github.sha }}
+        path: openmw-linux-x64.tar.gz
 
   MacOS:
     strategy:

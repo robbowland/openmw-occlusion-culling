@@ -4,28 +4,26 @@ on:
   workflow_call:
     inputs:
       image:
-        description: Window Server image
+        description: Windows Server image
         required: true
         type: string
       msvc:
         description: MSVC version (2022/2026)
         default: "2022"
         type: string
+      vcpkg-deps-tag:
+        description: Override vcpkg tag (reads CI/deps_versions.msvc.sh if empty)
+        default: ""
+        type: string
       build-type:
         default: RelWithDebInfo
         type: string
-      package:
-        default: false
-        type: boolean
-      release:
-        default: false
-        type: boolean
 
 jobs:
   Windows:
     name: windows-${{ inputs.image }}
 
-    runs-on: windows-${{ inputs.image }}
+    runs-on: windows-16core
 
     env:
       archive: FAILEDTODOWNLOAD
@@ -37,17 +35,30 @@ jobs:
 
     - uses: actions/checkout@v6
 
-    - shell: bash
-      name: Add deps version env to GITHUB_ENV, stripping comments
+    - name: Resolve vcpkg tag
+      shell: bash
       run: |
-        sed '/^\s*#/d; /^\s*$/d' "${{ github.workspace }}/CI/deps_versions.msvc.sh" >> $GITHUB_ENV
+        if [[ -n "${{ inputs.vcpkg-deps-tag }}" ]]; then
+          echo "VCPKG_TAG=${{ inputs.vcpkg-deps-tag }}" >> $GITHUB_ENV
+        else
+          source CI/deps_versions.msvc.sh
+          echo "VCPKG_TAG=$VCPKG_TAG" >> $GITHUB_ENV
+        fi
 
     - name: Create directories for dependencies
       run: |
         mkdir -p ${{ github.workspace }}/deps
         mkdir -p ${{ github.workspace }}/deps/Qt
 
+    - name: Cache vcpkg deps
+      id: vcpkg-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/deps/vcpkg-x64-windows-${{ inputs.msvc }}-${{ env.VCPKG_TAG }}
+        key: vcpkg-deps-${{ inputs.msvc }}-${{ env.VCPKG_TAG }}
+
     - name: Download prebuilt vcpkg packages
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
       working-directory: ${{ github.workspace }}/deps
       run: |
         $MANIFEST = "vcpkg-x64-windows-${{ inputs.msvc }}-${{ env.VCPKG_TAG }}-manifest.txt"
@@ -65,6 +76,7 @@ jobs:
         echo "archive=$FILE" >> $env:GITHUB_ENV
 
     - name: Extract archived prebuilt vcpkg packages
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
       working-directory: ${{ github.workspace }}/deps
       run: 7z x -y -ovcpkg-x64-windows-${{ inputs.msvc }}-${{ env.VCPKG_TAG }} $env:archive
 
@@ -92,6 +104,12 @@ jobs:
 
     - uses: seanmiddleditch/gha-setup-ninja@master
 
+    - name: Prime ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: windows-${{ inputs.msvc }}-${{ inputs.build-type }}
+        max-size: 2000M
+
     - name: Configure OpenMW
       run: >
         cmake
@@ -99,6 +117,8 @@ jobs:
         -B ${{ github.workspace }}/build
         -G Ninja
         -D CMAKE_BUILD_TYPE=${{ inputs.build-type }}
+        -D CMAKE_C_COMPILER_LAUNCHER=ccache
+        -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
         -D CMAKE_TOOLCHAIN_FILE='${{ github.workspace }}/deps/vcpkg-x64-windows-${{ inputs.msvc }}-${{ env.VCPKG_TAG }}/scripts/buildsystems/vcpkg.cmake'
         -D CMAKE_PREFIX_PATH='${{ github.workspace }}/deps/Qt/${{ env.QT_VER }}/msvc2019_64'
         ${{ inputs.package && '-D CMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi"' || '' }}
@@ -143,35 +163,9 @@ jobs:
         mkdir ${{ github.workspace }}/build/iconengines
         cp plugins/iconengines/qsvgicon.dll ${{ github.workspace }}/build/iconengines
 
-    - name: Create symbol server directory structure
-      working-directory: ${{ github.workspace }}/build
-      run: |
-        ${{ github.workspace }}\CI\Store-Symbols.ps1
-        Move-Item ${{ github.workspace }}\build\SymStore ${{ github.workspace }}
-
-    - name: Move pdb files
-      run: |
-        robocopy build pdb *.pdb /MOVE
-        if ($lastexitcode -lt 8) {
-          $global:LASTEXITCODE = $null
-        }
-
-    - name: Install OpenMW
-      if: ${{ ! inputs.package }}
-      run: cmake --install ${{ github.workspace }}/build --prefix ${{ github.workspace }}/install
-
-    - name: Package OpenMW
-      if: ${{ inputs.package }}
-      run: |
-        cpack --config "${{ github.workspace }}/build/CPackConfig.cmake" -B "${{ github.workspace }}/install"
-        rm -r -Force "${{ github.workspace }}/install/_CPack_Packages"
-
-    - name: Remove extra pdb files
-      if: ${{ ! inputs.package }}
+    - name: Package
       shell: bash
-      run: |
-        rm -rf install/bin
-        rm -rf install/_deps
+      run: bash CI/package-windows.sh build . openmw-windows-x64
 
     - name: Generate CI-ID.txt
       shell: bash
