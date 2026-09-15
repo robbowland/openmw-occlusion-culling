@@ -47,3 +47,16 @@ Post-Processing Settings
       Can be performance heavy with vanilla assets.
       For better performance, use alpha-tested foliage mods (e.g., Morrowind Optimization Patch) and disable this setting.
       Disable if no shaders use the depth buffer.
+
+.. omw-setting::
+   :title: water depth postpass
+   :type: boolean
+   :range: true, false
+   :default: false
+
+   Include the visible water surface in the depth texture supplied to post-processing.
+   This compatibility option is for older shader chains that expect water-surface
+   depth rather than the submerged terrain (for example, distance fog effects).
+   Water refraction still samples opaque depth before this postpass is drawn.
+   Requires ``transparent postpass`` and an application restart.
+   Leave disabled for effects designed to reconstruct submerged geometry.

@@ -153,7 +153,7 @@ namespace MWRender
         // resolves the multisampled depth buffer and optionally draws an additional depth postpass
         mTransparentDepthPostPass
             = new TransparentDepthBinCallback(mRendering.getResourceSystem()->getSceneManager()->getShaderManager(),
-                Settings::postProcessing().mTransparentPostpass);
+                Settings::postProcessing().mTransparentPostpass, Settings::postProcessing().mWaterDepthPostpass);
         mOpaqueColorResolve = new OpaqueColorBinCallback;
         osg::ref_ptr<osgUtil::RenderBin> opaqueResolveBin
             = new osgUtil::RenderBin(osgUtil::RenderBin::SORT_FRONT_TO_BACK);

@@ -19,9 +19,11 @@
 
 namespace MWRender
 {
-    TransparentDepthBinCallback::TransparentDepthBinCallback(Shader::ShaderManager& shaderManager, bool postPass)
+    TransparentDepthBinCallback::TransparentDepthBinCallback(
+        Shader::ShaderManager& shaderManager, bool postPass, bool waterDepthPostpass)
         : mStateSet(new osg::StateSet)
         , mPostPass(postPass)
+        , mWaterDepthPostpass(waterDepthPostpass)
     {
         osg::ref_ptr<osg::Image> image = new osg::Image;
         image->allocateImage(1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE);
@@ -96,7 +98,9 @@ namespace MWRender
             if (rl->_drawable->getNodeMask() == Mask_ParticleSystem)
                 continue;
 
-            if (mWater && rl->_drawable.get() == mWater->getDrawable())
+            // The water shader has already consumed opaque depth. Legacy effects
+            // may now receive the visible surface instead of the submerged terrain.
+            if (!mWaterDepthPostpass && mWater && rl->_drawable.get() == mWater->getDrawable())
                 continue;
 
             if (ss->getAttribute(osg::StateAttribute::MATERIAL))
