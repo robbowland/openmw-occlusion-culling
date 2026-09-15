@@ -693,8 +693,9 @@ namespace MWMechanics
         const ESM::Position& posdata = actor.getRefData().getPosition();
         const osg::Vec3f actorPos(posdata.asVec3());
         const osg::Vec3f actorDirXY = osg::Quat(posdata.rot[2], osg::Vec3(0, 0, -1)) * osg::Vec3f(0, 1, 0);
-        // Only the player can look up, apparently.
-        const float actorVerticalAngle = actor == getPlayer() ? -std::sin(posdata.rot[0]) : 0.f;
+        // NPC aim controllers can pitch too. Preserve the existing creature contact rules.
+        const float actorVerticalAngle
+            = (actor == getPlayer() || actor.getClass().isNpc()) ? -std::sin(posdata.rot[0]) : 0.f;
         const float actorEyeLevel = world->getHalfExtents(actor, true).z() * 2.f * 0.85f;
         const osg::Vec3f actorEyePos{ actorPos.x(), actorPos.y(), actorPos.z() + actorEyeLevel };
         const bool canMoveByZ = canActorMoveByZAxis(actor);
