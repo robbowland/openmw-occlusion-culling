@@ -234,6 +234,7 @@ namespace SceneUtil
             stateset->addUniform(new osg::Uniform("sun.diffuse", osg::Vec4f{}));
             stateset->addUniform(new osg::Uniform("sun.ambient", osg::Vec4f{}));
             stateset->addUniform(new osg::Uniform("sun.specular", osg::Vec4f{}));
+            stateset->addUniform(new osg::Uniform("pointLightRadiusInverse", 1.f));
 
             if (node->getClusteredLighting())
             {
@@ -288,6 +289,9 @@ namespace SceneUtil
             stateset->getUniform("sun.diffuse")->set(sun->getDiffuse());
             stateset->getUniform("sun.ambient")->set(sun->getAmbient());
             stateset->getUniform("sun.specular")->set(sun->getSpecular());
+            // Let legacy shader integrations recover the record radius without
+            // changing native light bounds, buffers, or attenuation policy.
+            stateset->getUniform("pointLightRadiusInverse")->set(1.f / node->getPointLightRadiusMultiplier());
 
             if (node->getClusteredLighting())
             {
