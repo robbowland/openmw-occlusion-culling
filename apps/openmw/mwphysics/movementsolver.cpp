@@ -448,6 +448,86 @@ namespace MWPhysics
 
     void MovementSolver::move(ProjectileFrameData& projectile, float time, const btCollisionWorld* collisionWorld)
     {
+        if (projectile.mProjectile->waterPenetrationEnabled())
+        {
+            // Unlike the legacy callback, choose the closest valid contact
+            // before applying side effects. Water and targets may share a tick.
+            struct Closest : btCollisionWorld::ClosestConvexResultCallback
+            {
+                ProjectileFrameData& p;
+                const btCollisionObject* object = nullptr;
+                Closest(ProjectileFrameData& data, btVector3 from, btVector3 to)
+                    : ClosestConvexResultCallback(from, to), p(data) {}
+                btScalar addSingleResult(btCollisionWorld::LocalConvexResult& r, bool normal) override
+                {
+                    const auto* obj = r.m_hitCollisionObject;
+                    if (obj == p.mCaster || obj == p.mCollisionObject) return 1.f;
+                    const int type = obj->getBroadphaseHandle()->m_collisionFilterGroup;
+                    if (type == CollisionType_Actor && !p.mProjectile->isValidTarget(obj)) return 1.f;
+                    if (type == CollisionType_Projectile
+                        && !p.mProjectile->isValidTarget(static_cast<Projectile*>(obj->getUserPointer())->getCasterCollisionObject()))
+                        return 1.f;
+                    if (r.m_hitFraction > m_closestHitFraction) return 1.f;
+                    object = obj;
+                    return ClosestConvexResultCallback::addSingleResult(r, normal);
+                }
+            };
+            auto& arrow = *projectile.mProjectile;
+            const auto waterLock = arrow.lockWaterState();
+            auto& water = arrow.waterState();
+            float remaining = time;
+            // At most air segment + underwater segment; never an unbounded loop.
+            for (int segment = 0; segment < 2 && remaining > 0.f && arrow.isActive(); ++segment)
+            {
+                const btVector3 from = Misc::Convert::toBullet(projectile.mPosition);
+                const float speed = projectile.mMovement.length();
+                if (speed <= 0.f) return;
+                const btVector3 direction = Misc::Convert::toBullet(projectile.mMovement / speed);
+                const float dt = water.entered ? std::min(remaining, std::max(0.f, Misc::WaterProjectile::MaxTime-water.age)) : remaining;
+                const float requested = water.entered ? Misc::WaterProjectile::stepDistance(speed, water.age, dt) : speed*dt;
+                const float distance = water.entered ? Misc::WaterProjectile::allowedDistance(water, from.z(), direction.z(), requested) : requested;
+                if (water.entered && (distance < 0.0001f || dt <= 0.f))
+                {
+                    arrow.hit(nullptr, from, btVector3(0,0,1));
+                    break;
+                }
+                const btVector3 to = from + direction * distance;
+                Closest callback(projectile, from, to);
+                callback.m_collisionFilterMask = CollisionType_AnyPhysical;
+                if (water.entered) callback.m_collisionFilterMask &= ~CollisionType_Water;
+                callback.m_collisionFilterGroup = CollisionType_Projectile;
+                const auto* shape = static_cast<const btConvexShape*>(projectile.mCollisionObject->getCollisionShape());
+                collisionWorld->convexSweepTest(shape, btTransform(btQuaternion::getIdentity(), from),
+                    btTransform(btQuaternion::getIdentity(), to), callback);
+                const float fraction = callback.hasHit() ? callback.m_closestHitFraction : 1.f;
+                const btVector3 end = from.lerp(to, fraction);
+                projectile.mPosition = Misc::Convert::toOsg(end);
+                if (water.entered)
+                {
+                    water.travel += distance*fraction;
+                    water.age += dt;
+                }
+                if (callback.hasHit())
+                {
+                    const int type = callback.object->getBroadphaseHandle()->m_collisionFilterGroup;
+                    if (type == CollisionType_Water)
+                    {
+                        // Contact point is the surface, not the sphere centre.
+                        arrow.enterWater(callback.m_hitPointWorld);
+                        remaining *= 1.f-fraction;
+                        continue;
+                    }
+                    if (type == CollisionType_Projectile)
+                        static_cast<Projectile*>(callback.object->getUserPointer())->hit(
+                            projectile.mCollisionObject, callback.m_hitPointWorld, callback.m_hitNormalWorld);
+                    arrow.hit(callback.object, callback.m_hitPointWorld, callback.m_hitNormalWorld);
+                }
+                else if (water.entered && (distance < requested || water.age >= Misc::WaterProjectile::MaxTime))
+                    arrow.hit(nullptr, end, btVector3(0,0,1));
+                break;
+            }
+            return;
+        }
         btVector3 btFrom = Misc::Convert::toBullet(projectile.mPosition);
         btVector3 btTo = Misc::Convert::toBullet(projectile.mPosition + projectile.mMovement * time);
 

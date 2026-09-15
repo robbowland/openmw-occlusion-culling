@@ -720,7 +720,12 @@ namespace MWPhysics
         mTimeAccum += dt;
 
         if (skipSimulation)
+        {
+            // Loading/teleporting discards this update, including its elapsed
+            // time. Do not replay it on the next (possibly slowed) frame.
+            mTimeAccum = 0.f;
             mTaskScheduler->resetSimulation(mActors);
+        }
         else
         {
             std::vector<Simulation>& simulations = mSimulations[mSimulationsCounter++ % mSimulations.size()];

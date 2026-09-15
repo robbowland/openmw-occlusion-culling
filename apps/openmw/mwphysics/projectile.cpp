@@ -70,7 +70,7 @@ namespace MWPhysics
     MWWorld::Ptr Projectile::getTarget() const
     {
         assert(!mActive);
-        auto* target = static_cast<PtrHolder*>(mHitTarget->getUserPointer());
+        auto* target = mHitTarget ? static_cast<PtrHolder*>(mHitTarget->getUserPointer()) : nullptr;
         return target ? target->getPtr() : MWWorld::Ptr();
     }
 

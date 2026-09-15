@@ -1,5 +1,8 @@
 #include "projectilestate.hpp"
 
+#include <algorithm>
+#include <iterator>
+
 #include "esmreader.hpp"
 #include "esmwriter.hpp"
 
@@ -60,6 +63,13 @@ namespace ESM
         esm.writeHNT("WIND", mAttackWindUp);
     }
 
+    void ProjectileState::saveWater(ESMWriter& esm) const
+    {
+        // Only inside WPRJ: never append fields to the legacy PROJ record.
+        save(esm);
+        esm.writeHNT("WATR", mWater);
+    }
+
     void ProjectileState::load(ESMReader& esm)
     {
         BaseProjectileState::load(esm);
@@ -72,6 +82,8 @@ namespace ESM
 
         mAttackWindUp = -1.f;
         esm.getHNOT(mAttackWindUp, "WIND");
+        std::fill(std::begin(mWater), std::end(mWater), 0.f);
+        esm.getHNOT(mWater, "WATR");
     }
 
 }

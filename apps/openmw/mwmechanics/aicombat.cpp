@@ -3,6 +3,7 @@
 #include <components/detournavigator/navigatorutils.hpp>
 #include <components/esm3/aisequence.hpp>
 #include <components/misc/coordinateconverter.hpp>
+#include <components/misc/constants.hpp>
 #include <components/misc/mathutil.hpp>
 #include <components/misc/pathgridutils.hpp>
 #include <components/misc/rng.hpp>
@@ -12,6 +13,7 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/inventorystore.hpp"
 
 #include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/environment.hpp"
@@ -138,6 +140,45 @@ namespace MWMechanics
         if (actorStats.isParalyzed() || actorStats.getKnockedDown())
             return false;
 
+        // A submerged opponent is temporarily hidden, not a reason for a shore
+        // archer to discard a usable bow and swim after them unarmed. Keep the
+        // existing ranged action while the target is in range; release the hold
+        // naturally on resurfacing, leaving range, target loss or an existing
+        // flee state. No package restart, new target acquisition or forced gear.
+        if (actor.getClass().isNpc() && !storage.isFleeing() && storage.mCurrentAction)
+        {
+            const ESM::Weapon* heldAction = storage.mCurrentAction->getWeapon();
+            auto world = MWBase::Environment::get().getWorld();
+            if (heldAction && (heldAction->mData.mType == ESM::WeaponType::MarksmanBow
+                    || heldAction->mData.mType == ESM::WeaponType::MarksmanCrossbow)
+                && !world->isSwimming(actor) && world->isSwimming(target)
+                && world->isUnderwater(target,1.f)
+                && getDistanceToBounds(actor,target) <= storage.mAttackRange
+                // Let ordinary action selection handle new flee pressure or
+                // depleted/changed ammunition; do not freeze an unusable action.
+                && vanillaRateFlee(actor, target) < 100.f
+                && actor.getClass().getInventoryStore(actor).getSlot(MWWorld::InventoryStore::Slot_Ammunition)
+                    != actor.getClass().getInventoryStore(actor).end()
+                && actor.getClass().getInventoryStore(actor).getSlot(MWWorld::InventoryStore::Slot_Ammunition)
+                    ->get<ESM::Weapon>()->mBase->mData.mType
+                    == (heldAction->mData.mType == ESM::WeaponType::MarksmanBow ? ESM::WeaponType::Arrow : ESM::WeaponType::Bolt))
+            {
+                storage.stopAttack();
+                storage.stopCombatMove();
+                storage.mRotateMove=false;
+                auto& stats=actor.getClass().getCreatureStats(actor);
+                stats.setAttackingOrSpell(false);
+                auto& movement=actor.getClass().getMovementSettings(actor);
+                for (int axis=0;axis<3;++axis)
+                {
+                    movement.mPosition[axis]=0.f;
+                    movement.mRotation[axis]=0.f;
+                }
+                storage.mActionCooldown=0.f;
+                return false;
+            }
+        }
+
         if (!storage.isFleeing())
         {
             const ESM::Weapon* weapon = nullptr;
@@ -182,7 +223,22 @@ namespace MWMechanics
                 MWBase::World* world = MWBase::Environment::get().getWorld();
                 const osg::Vec3f actorPos(actor.getRefData().getPosition().asVec3());
                 const osg::Vec3f targetPos(target.getRefData().getPosition().asVec3());
-                const osg::Vec3f targetRelativePos = world->aimToTarget(actor, target, isRangedCombat);
+                osg::Vec3f targetRelativePos = world->aimToTarget(actor, target, isRangedCombat);
+                // Upstream 0.52 aims every frame rather than predicting target
+                // movement. Aim at the exposed upper body for surface archery;
+                // projectile release corrects gravity using the actual speed.
+                if (weapon
+                    && (weapon->mData.mType == ESM::WeaponType::MarksmanBow
+                        || weapon->mData.mType == ESM::WeaponType::MarksmanCrossbow)
+                    && world->isSwimming(target) && target.isInCell())
+                {
+                    const float originZ = actorPos.z()
+                        + world->getHalfExtents(actor).z() * 2.f * Constants::TorsoHeight;
+                    const float centreZ = originZ + targetRelativePos.z();
+                    const float aimZ = std::min(centreZ + world->getHalfExtents(target).z() - 4.f,
+                        std::max(centreZ, target.getCell()->getWaterLevel() + 4.f));
+                    targetRelativePos.z() = aimZ - originZ;
+                }
                 storage.mMovement.mRotation[0] = getXAngleToDir(targetRelativePos);
                 // using targetRelativePos results in spastic movements since the head is animated
                 storage.mMovement.mRotation[2] = getZAngleToDir(targetPos - actorPos);

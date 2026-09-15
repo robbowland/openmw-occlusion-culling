@@ -11,6 +11,7 @@
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadclas.hpp>
+#include <components/esm3/projectilestate.hpp>
 
 #include <components/l10n/manager.hpp>
 
@@ -538,6 +539,7 @@ void MWState::StateManager::loadGame(const Character* character, const std::file
                 case ESM::REC_DYNA:
                 case ESM::REC_ACTC:
                 case ESM::REC_PROJ:
+                case ESM::WaterProjectileRecord:
                 case ESM::REC_MPRJ:
                 case ESM::REC_ENAB:
                 case ESM::REC_LEVC:

@@ -1,6 +1,7 @@
 #include "projectilemanager.hpp"
 
 #include <iomanip>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -47,6 +48,7 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/aisequence.hpp"
 #include "../mwmechanics/combat.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/spellcasting.hpp"
@@ -63,6 +65,8 @@
 
 namespace
 {
+    // Opt-in, event-only instrumentation. Never print per physics step.
+    const bool waterArrowQA = std::getenv("OPENMW_WATER_ARROW_QA") != nullptr;
     ESM::EffectList getMagicBoltData(std::vector<ESM::RefId>& projectileIDs, std::set<ESM::RefId>& sounds, float& speed,
         VFS::Path::NormalizedView& texture, std::string& sourceName, const ESM::RefId& id)
     {
@@ -375,6 +379,43 @@ namespace MWWorld
         state.mAttackStrength = attackStrength;
         state.mAttackWindUp = attackWindUp;
 
+        // NPC surface archery must use the actual release speed and ArrowBone
+        // origin, not the intended charge and torso origin from an earlier AI
+        // update. Correct elevation only; retain the actor's horizontal aim.
+        // No player assistance, submerged-target acquisition or in-flight homing.
+        const ESM::RefId projectileType = projectile.get<ESM::Weapon>()->mBase->mData.mType;
+        auto world = MWBase::Environment::get().getWorld();
+        if ((projectileType == ESM::WeaponType::Arrow || projectileType == ESM::WeaponType::Bolt)
+            && actor.getClass().isNpc() && actor != world->getPlayerPtr() && speed > 0.f)
+        {
+            Ptr target;
+            if (actor.getClass().getCreatureStats(actor).getAiSequence().getCombatTarget(target)
+                && !target.isEmpty() && target.isInCell() && world->isSwimming(target)
+                && !world->isUnderwater(target,1.f))
+            {
+                osg::Vec3f forward(state.mVelocity.x(),state.mVelocity.y(),0.f);
+                osg::Vec3f offset=target.getRefData().getPosition().asVec3()-pos;
+                offset.z()=0.f;
+                const float horizontal=offset.length();
+                if (horizontal > 1.f && forward.normalize() > 0.f
+                    && forward*offset/horizontal > 0.98f)
+                {
+                    const float half=world->getHalfExtents(target).z();
+                    const float base=target.getRefData().getPosition().pos[2];
+                    const float aimZ=std::min(base+2.f*half-4.f,
+                        std::max(base+half,target.getCell()->getWaterLevel()+4.f));
+                    const float vertical=Misc::WaterProjectile::ballisticAimZ(horizontal,aimZ-pos.z(),speed,
+                        Constants::GravityConst*Constants::UnitsPerMeter*0.1f);
+                    osg::Vec3f direction=forward*horizontal+osg::Vec3f(0,0,vertical);
+                    direction.normalize();
+                    state.mVelocity=direction*speed;
+                    if (waterArrowQA) Log(Debug::Info) << "WATER_ARROW_AIM target=" << target.getCellRef().getRefId()
+                        << " target_top=" << base+2.f*half << " water=" << target.getCell()->getWaterLevel()
+                        << " aim_z=" << aimZ << " speed=" << speed;
+                }
+            }
+        }
+
         MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(), projectile.getCellRef().getRefId());
         MWWorld::Ptr ptr = ref.getPtr();
 
@@ -384,6 +425,19 @@ namespace MWWorld
             SceneUtil::addEnchantedGlow(state.mNode, mResourceSystem, ptr.getClass().getEnchantmentColor(ptr));
 
         state.mProjectileId = mPhysics->addProjectile(actor, pos, model, false);
+        if (projectileType == ESM::WeaponType::Arrow || projectileType == ESM::WeaponType::Bolt)
+        {
+            mPhysics->getProjectile(state.mProjectileId)->enableWaterPenetration();
+            // Underwater-origin arrows never cross the surface collision plane.
+            // Start their budget immediately, without inventing an entry ripple.
+            if (actor.isInCell() && world->isUnderwater(actor.getCell(), pos))
+                mPhysics->getProjectile(state.mProjectileId)->restoreWaterState(
+                    { true, actor.getCell()->getWaterLevel(), 0.f, 0.f });
+            if (waterArrowQA) Log(Debug::Info) << "WATER_ARROW_LAUNCH id=" << state.mProjectileId
+                << " caster=" << actor.getCellRef().getRefId()
+                << " x=" << pos.x() << " y=" << pos.y() << " z=" << pos.z()
+                << " vx=" << state.mVelocity.x() << " vy=" << state.mVelocity.y() << " vz=" << state.mVelocity.z();
+        }
         state.mToDelete = false;
         mProjectiles.push_back(std::move(state));
     }
@@ -543,11 +597,27 @@ namespace MWWorld
             const auto pos = projectile->getSimulationPosition();
             projectileState.mNode->setPosition(pos);
 
+            btVector3 waterEntry;
+            if (projectile->takeWaterRipple(waterEntry))
+            {
+                mRendering->emitWaterRipple(Misc::Convert::toOsg(waterEntry));
+                if (waterArrowQA) Log(Debug::Info) << "WATER_ARROW_ENTRY id=" << projectileState.mProjectileId
+                    << " surface=" << projectile->waterStateSnapshot().surface
+                    << " speed_factor=" << Misc::WaterProjectile::speedFactor(projectile->waterStateSnapshot().age);
+            }
+
             if (projectile->isActive())
                 continue;
 
             const auto target = projectile->getTarget();
             auto caster = projectileState.getCaster();
+            if (waterArrowQA && projectile->waterPenetrationEnabled())
+                Log(Debug::Info) << "WATER_ARROW_END id=" << projectileState.mProjectileId
+                    << " entered=" << projectile->waterStateSnapshot().entered
+                    << " travel=" << projectile->waterStateSnapshot().travel
+                    << " age=" << projectile->waterStateSnapshot().age
+                    << " depth=" << (projectile->waterStateSnapshot().surface-projectile->getHitPosition().z())
+                    << " target=" << (target.isEmpty() ? "none" : target.getCellRef().getRefId().toString());
             assert(target != caster);
 
             if (caster.isEmpty())
@@ -666,8 +736,9 @@ namespace MWWorld
     {
         for (const ProjectileState& projectile : mProjectiles)
         {
-            writer.startRecord(ESM::REC_PROJ);
-
+            const auto* physicsProjectile = mPhysics->getProjectile(projectile.mProjectileId);
+            if (projectile.mToDelete || !physicsProjectile || !physicsProjectile->isActive())
+                continue;
             ESM::ProjectileState state;
             state.mId = projectile.mIdArrow;
             state.mPosition = ESM::Vector3(osg::Vec3f(projectile.mNode->getPosition()));
@@ -678,10 +749,22 @@ namespace MWWorld
             state.mVelocity = projectile.mVelocity;
             state.mAttackStrength = projectile.mAttackStrength;
             state.mAttackWindUp = projectile.mAttackWindUp;
+            const auto water = physicsProjectile->waterStateSnapshot();
+            if (water.entered)
+            {
+                state.mWater[0] = 1.f;
+                state.mWater[1] = water.surface;
+                state.mWater[2] = water.travel;
+                state.mWater[3] = water.age;
+            }
 
-            state.save(writer);
-
-            writer.endRecord(ESM::REC_PROJ);
+            const auto recordType = water.entered ? ESM::WaterProjectileRecord : ESM::REC_PROJ;
+            writer.startRecord(recordType);
+            if (water.entered)
+                state.saveWater(writer);
+            else
+                state.save(writer);
+            writer.endRecord(recordType);
         }
 
         for (const MagicBoltState& bolt : mMagicBolts)
@@ -705,7 +788,7 @@ namespace MWWorld
 
     bool ProjectileManager::readRecord(ESM::ESMReader& reader, uint32_t type)
     {
-        if (type == ESM::REC_PROJ)
+        if (type == ESM::REC_PROJ || type == ESM::WaterProjectileRecord)
         {
             ESM::ProjectileState esm;
             esm.load(reader);
@@ -728,6 +811,31 @@ namespace MWWorld
 
                 state.mProjectileId
                     = mPhysics->addProjectile(state.getCaster(), osg::Vec3f(esm.mPosition), model, false);
+                const ESM::RefId weaponType = ptr.get<ESM::Weapon>()->mBase->mData.mType;
+                if (weaponType == ESM::WeaponType::Arrow || weaponType == ESM::WeaponType::Bolt)
+                {
+                    auto* physicsProjectile = mPhysics->getProjectile(state.mProjectileId);
+                    physicsProjectile->enableWaterPenetration();
+                    if (esm.mWater[0] != 0.f)
+                        physicsProjectile->restoreWaterState(
+                            { true, esm.mWater[1], esm.mWater[2], esm.mWater[3] });
+                    else
+                    {
+                        const auto caster = state.getCaster();
+                        auto world = MWBase::Environment::get().getWorld();
+                        if (!caster.isEmpty() && caster.isInCell()
+                            && world->isUnderwater(caster.getCell(), osg::Vec3f(esm.mPosition)))
+                            physicsProjectile->restoreWaterState(
+                                { true, caster.getCell()->getWaterLevel(), 0.f, 0.f });
+                    }
+                    if (waterArrowQA)
+                    {
+                        const auto water = physicsProjectile->waterStateSnapshot();
+                        Log(Debug::Info) << "WATER_ARROW_RESTORE id=" << state.mProjectileId
+                            << " entered=" << water.entered << " surface=" << water.surface
+                            << " travel=" << water.travel << " age=" << water.age;
+                    }
+                }
             }
             catch (const std::exception& e)
             {

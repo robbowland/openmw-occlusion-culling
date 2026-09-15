@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include <LinearMath/btVector3.h>
+#include <components/misc/waterprojectile.hpp>
 
 #include "ptrholder.hpp"
 
@@ -54,11 +55,48 @@ namespace MWPhysics
         btVector3 getHitPosition() const { return mHitPosition; }
         btVector3 getHitNormal() const { return mHitNormal; }
 
+        void enableWaterPenetration() { mWaterPenetration = true; }
+        bool waterPenetrationEnabled() const { return mWaterPenetration; }
+        std::unique_lock<std::mutex> lockWaterState() const { return std::unique_lock<std::mutex>(mWaterMutex); }
+        Misc::WaterProjectile::State waterStateSnapshot() const
+        {
+            const auto lock = lockWaterState();
+            return mWaterState;
+        }
+        void restoreWaterState(const Misc::WaterProjectile::State& state)
+        {
+            const auto lock = lockWaterState();
+            mWaterState = state;
+            mWaterRipplePending = false; // Do not replay an already emitted entry splash.
+        }
+        // Physics worker owns lockWaterState() while mutating this state.
+        Misc::WaterProjectile::State& waterState() { return mWaterState; }
+        void enterWater(btVector3 position)
+        {
+            mWaterState.entered = true;
+            mWaterState.surface = position.z();
+            mWaterEntryPosition = position;
+            mWaterRipplePending = true;
+        }
+        bool takeWaterRipple(btVector3& position)
+        {
+            const auto lock = lockWaterState();
+            if (!mWaterRipplePending) return false;
+            position = mWaterEntryPosition;
+            mWaterRipplePending = false;
+            return true;
+        }
+
     private:
         std::unique_ptr<btCollisionShape> mShape;
         btConvexShape* mConvexShape;
 
         bool mHitWater;
+        bool mWaterPenetration = false;
+        bool mWaterRipplePending = false;
+        btVector3 mWaterEntryPosition;
+        Misc::WaterProjectile::State mWaterState;
+        mutable std::mutex mWaterMutex;
         std::atomic<bool> mActive;
         MWWorld::Ptr mCaster;
         const btCollisionObject* mCasterColObj;

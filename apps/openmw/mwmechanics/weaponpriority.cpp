@@ -46,9 +46,14 @@ namespace MWMechanics
 
         if (weapclass != ESM::WeaponType::Melee)
         {
-            // Underwater ranged combat is impossible
+            // Shooters retain the normal underwater restriction. Bow/bolt AI
+            // may target an exposed upper body; spent arrows have a separate
+            // bounded underwater flight policy in physics.
+            const ESM::RefId weaponType = weapon->mData.mType;
+            const bool shallowProjectile = weaponType == ESM::WeaponType::MarksmanBow || weaponType == ESM::WeaponType::MarksmanCrossbow
+                || weaponType == ESM::WeaponType::Arrow || weaponType == ESM::WeaponType::Bolt;
             if (world->isUnderwater(MWWorld::ConstPtr(actor), 0.75f)
-                || world->isUnderwater(MWWorld::ConstPtr(enemy), 0.75f))
+                || world->isUnderwater(MWWorld::ConstPtr(enemy), shallowProjectile ? 1.f : 0.75f))
                 return 0.f;
 
             // Use a higher rating multiplier if the actor is out of enemy's reach, use the normal mult otherwise
@@ -191,7 +196,10 @@ namespace MWMechanics
         const ESM::RefId type = esmWeap->mData.mType;
         if (getWeaponType(type)->mWeaponClass != ESM::WeaponType::Melee)
         {
-            if (!ammo.isEmpty() && !MWBase::Environment::get().getWorld()->isSwimming(enemy))
+            const bool shallowProjectile = type == ESM::WeaponType::MarksmanBow
+                || type == ESM::WeaponType::MarksmanCrossbow;
+            if (!ammo.isEmpty() && !MWBase::Environment::get().getWorld()->isUnderwater(
+                    MWWorld::ConstPtr(enemy), shallowProjectile ? 1.f : 0.75f))
             {
                 bonusDamage = ammo.get<ESM::Weapon>()->mBase->mData.mChop[1];
                 chopMult = fAIRangeMeleeWeaponMult;
