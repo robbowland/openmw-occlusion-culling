@@ -1495,6 +1495,7 @@ namespace MWRender
             }
             else if (it->first == "Shadows")
             {
+                mViewer->stopThreading();
                 mShadowManager->setupShadowSettings(
                     Settings::shadows(), mResourceSystem->getSceneManager()->getShaderManager());
                 mShadowManager->setIndoorShadowCastingMask(getIndoorShadowCastingMask());
@@ -1512,11 +1513,10 @@ namespace MWRender
                         defines.erase(key);
                     for (const auto& [key, value] : shadowDefines)
                         defines[key] = value;
-                    mViewer->stopThreading();
                     mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
-                    mViewer->startThreading();
                     mAppliedShadowDefines = std::move(shadowDefines);
                 }
+                mViewer->startThreading();
             }
             else if (it->first == "Post Processing" && it->second == "enabled")
             {

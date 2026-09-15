@@ -826,6 +826,23 @@
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
                                 <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:ShadowUpdateInterval}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ShadowUpdateIntervalTooltip}"/>
+                                </Widget>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 80 24" align="Right Top" name="ShadowUpdateInterval">
+                                    <Property key="ReadOnly" value="true"/>
+                                    <Property key="AddItem" value="1"/>
+                                    <Property key="AddItem" value="2"/>
+                                    <Property key="AddItem" value="3"/>
+                                    <Property key="AddItem" value="4"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
                                 <Widget type="AutoSizedButton" skin="MW_Button" name="ActorShadowsButton">
                                     <UserString key="SettingCategory" value="Shadows"/>
                                     <UserString key="SettingName" value="actor shadows"/>

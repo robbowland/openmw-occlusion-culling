@@ -32,6 +32,8 @@
 
 #include <components/shader/shadermanager.hpp>
 
+#include "shadowreuse.hpp"
+
 // NOLINTBEGIN(readability-identifier-naming)
 
 namespace SceneUtil {
@@ -202,6 +204,9 @@ namespace SceneUtil {
             unsigned int                        _sm_i;
             osg::ref_ptr<osg::Texture2D>        _texture;
             osg::ref_ptr<osg::Camera>           _camera;
+            // Before perspective adjustment; needed to remap a reused cascade
+            // into the current eye space (including the other uniform slot).
+            osg::Matrixd                       _validRegionViewProjection;
         };
 
         typedef std::list< osg::ref_ptr<ShadowData> > ShadowDataList;
@@ -238,7 +243,10 @@ namespace SceneUtil {
             ShadowDataList              _shadowDataList;
             std::array<Uniforms, 2>     _uniforms;
 
-            unsigned int _numValidShadows;
+            unsigned int _numValidShadows = 0;
+            mutable ShadowReuse _shadowReuse;
+            unsigned int _shadowRevision = 0;
+            osg::Matrixd _reuseProjection;
         };
 
         virtual ViewDependentData* createViewDependentData(osgUtil::CullVisitor* cv);
@@ -275,10 +283,21 @@ namespace SceneUtil {
 
         void setWorldMask(unsigned int worldMask) { _worldMask = worldMask; }
 
+        void setShadowUpdateInterval(unsigned int interval) { _shadowUpdateInterval = interval; }
+        void setFrustumExpansion(double base, double perSkip)
+        {
+            _frustumExpansionBase = base;
+            _frustumExpansionPerSkip = perSkip;
+        }
+        void invalidateShadowMaps() { ++_shadowRevision; }
+
         osg::ref_ptr<osg::StateSet> getOrCreateShadowsBinStateSet();
 
     protected:
         virtual ~MWShadowTechnique();
+
+        void assignValidRegionMatrix(osgUtil::CullVisitor& cv, const osg::Matrixd& lightViewProjection,
+            unsigned int sm_i, Uniforms& uniforms);
 
         osg::ref_ptr<ComputeLightSpaceBounds>   _clsb;
 
@@ -312,6 +331,11 @@ namespace SceneUtil {
         float                                   _shadowFadeStart = 0.0f;
 
         unsigned int                            _worldMask = ~0u;
+
+        unsigned int                            _shadowUpdateInterval = 1;
+        unsigned int                            _shadowRevision = 1;
+        double                                  _frustumExpansionBase = 0.0;
+        double                                  _frustumExpansionPerSkip = 0.0;
 
         class DebugHUD final : public osg::Referenced
         {

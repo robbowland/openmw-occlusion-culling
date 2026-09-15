@@ -813,6 +813,7 @@ MWShadowTechnique::ViewDependentData::ViewDependentData(MWShadowTechnique* vdsm)
 
 void MWShadowTechnique::ViewDependentData::releaseGLObjects(osg::State* state) const
 {
+    _shadowReuse.invalidate();
     for(ShadowDataList::const_iterator itr = _shadowDataList.begin();
         itr != _shadowDataList.end();
         ++itr)
@@ -842,6 +843,9 @@ MWShadowTechnique::MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::C
     _shadowRecievingPlaceholderStateSet = new osg::StateSet;
     _enableShadows = vdsm._enableShadows;
     mSetDummyStateWhenDisabled = vdsm.mSetDummyStateWhenDisabled;
+    _shadowUpdateInterval = vdsm._shadowUpdateInterval;
+    _frustumExpansionBase = vdsm._frustumExpansionBase;
+    _frustumExpansionPerSkip = vdsm._frustumExpansionPerSkip;
 }
 
 MWShadowTechnique::~MWShadowTechnique()
@@ -874,6 +878,8 @@ void MWShadowTechnique::enableShadows()
 
 void MWShadowTechnique::disableShadows(bool setDummyState)
 {
+    if (_enableShadows)
+        invalidateShadowMaps();
     _enableShadows = false;
     mSetDummyStateWhenDisabled = setDummyState;
 }
@@ -1033,6 +1039,7 @@ void SceneUtil::MWShadowTechnique::copyShadowMap(osgUtil::CullVisitor& cv, ViewD
         lhs_sd->_textureUnit = rhs_sd->_textureUnit;
         lhs_sd->_texture = rhs_sd->_texture;
         lhs_sd->_sm_i = rhs_sd->_sm_i;
+        lhs_sd->_validRegionViewProjection = rhs_sd->_validRegionViewProjection;
         sdl.push_back(lhs_sd);
     }
 
@@ -1053,7 +1060,7 @@ void SceneUtil::MWShadowTechnique::copyShadowStateSettings(osgUtil::CullVisitor&
 {
     for (const auto& sd : vdd->getShadowDataList())
     {
-        assignValidRegionSettings(cv, sd->_camera, sd->_sm_i, vdd->_uniforms[cv.getTraversalNumber()%2]);
+        assignValidRegionMatrix(cv, sd->_validRegionViewProjection, sd->_sm_i, vdd->_uniforms[cv.getTraversalNumber()%2]);
         assignShadowStateSettings(cv, sd->_camera, sd->_sm_i, vdd->_uniforms[cv.getTraversalNumber()%2]);
     }
 }
@@ -1119,7 +1126,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
     osg::CullSettings::ComputeNearFarMode cachedNearFarMode = cv.getComputeNearFarMode();
 
-    osg::RefMatrix& viewProjectionMatrix = *cv.getProjectionMatrix();
+    const osg::Matrixd viewProjectionMatrix = *cv.getProjectionMatrix();
 
     // check whether this main views projection is perspective or orthographic
     bool orthographicViewFrustum = viewProjectionMatrix(0,3)==0.0 &&
@@ -1157,6 +1164,23 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     cullShadowReceivingScene(&cv);
 
     cv.popStateSet();
+
+    // Reproject both sampling and pre-adjustment validity matrices for this
+    // visitor's current slot. Retaining old eye-space uniforms makes moving
+    // cameras use stale cascade boundaries; retaining only one slot also fails
+    // in single-threaded rendering where that slot alternates.
+    const auto* frameStamp = cv.getFrameStamp();
+    const double currentTime = frameStamp ? frameStamp->getReferenceTime() : 0.0;
+    if (!_customFrustumCallback && !_debugHud && frameStamp && vdd->numValidShadows() > 0
+        && vdd->_shadowRevision == _shadowRevision && vdd->_reuseProjection == viewProjectionMatrix
+        && vdd->_shadowReuse.reuse(_shadowUpdateInterval, currentTime))
+    {
+        copyShadowStateSettings(cv, vdd);
+        prepareStateSetForRenderingShadow(*vdd, cv.getTraversalNumber());
+        cv.setComputeNearFarMode(cachedNearFarMode);
+        return;
+    }
+    vdd->_shadowReuse.invalidate();
 
     if (cv.getComputeNearFarMode()!=osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR)
     {
@@ -1567,6 +1591,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
             cv.popStateSet();
 
+            sd->_validRegionViewProjection = camera->getViewMatrix() * camera->getProjectionMatrix();
             if (!orthographicViewFrustum && settings->getShadowMapProjectionHint()==ShadowSettings::PERSPECTIVE_SHADOW_MAP)
             {
                 assignValidRegionSettings(cv, camera, sm_i, vddUniforms);
@@ -1606,6 +1631,13 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     }
 
     vdd->setNumValidShadows(numValidShadows);
+
+    if (numValidShadows > 0 && frameStamp)
+    {
+        vdd->_shadowReuse.recordUpdate(currentTime);
+        vdd->_shadowRevision = _shadowRevision;
+        vdd->_reuseProjection = viewProjectionMatrix;
+    }
 
     if (numValidShadows>0)
     {
@@ -2714,6 +2746,16 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
     else
         return false;
 
+    // Preserve the upstream frustum when temporal reuse is off. Expansion and
+    // texel snapping provide the FreeFPS margin for a temporarily frozen map.
+    if (_shadowUpdateInterval > 1)
+    {
+        const double margin = _frustumExpansionBase + _frustumExpansionPerSkip * (_shadowUpdateInterval - 1);
+        const auto size = getShadowedScene()->getShadowSettings()->getTextureSize();
+        expandAndSnapShadowRange(xMin, xMax, size.x(), margin);
+        expandAndSnapShadowRange(yMin, yMax, size.y(), margin);
+    }
+
     if (xMin != -1.0 || yMin != -1.0 || zMin != -1.0 ||
         xMax != 1.0 || yMax != 1.0 || zMax != 1.0)
     {
@@ -3172,7 +3214,13 @@ void MWShadowTechnique::assignShadowStateSettings(osgUtil::CullVisitor& cv, osg:
 
 void SceneUtil::MWShadowTechnique::assignValidRegionSettings(osgUtil::CullVisitor & cv, osg::Camera* camera, unsigned int sm_i, Uniforms & uniforms)
 {
-    osg::Matrix validRegionMatrix = osg::Matrix::inverse(*cv.getModelViewMatrix()) *  camera->getViewMatrix() * camera->getProjectionMatrix();
+    assignValidRegionMatrix(cv, camera->getViewMatrix() * camera->getProjectionMatrix(), sm_i, uniforms);
+}
+
+void SceneUtil::MWShadowTechnique::assignValidRegionMatrix(osgUtil::CullVisitor& cv,
+    const osg::Matrixd& lightViewProjection, unsigned int sm_i, Uniforms& uniforms)
+{
+    osg::Matrix validRegionMatrix = osg::Matrix::inverse(*cv.getModelViewMatrix()) * lightViewProjection;
 
     std::string validRegionUniformName = "validRegionMatrix" + std::to_string(sm_i);
     osg::ref_ptr<osg::Uniform> validRegionUniform;

@@ -235,6 +235,11 @@ WobblyShores: "Wobbly Shores"
 
 Shadows: "Shadows"
 ShadowSoftShadows: "Soft Shadows"
+ShadowUpdateInterval: "Shadow Temporal Reuse"
+ShadowUpdateIntervalTooltip: |-
+    Reuse each view's shadow maps between updates. 1 is off; 2-4 update less often.
+    Maps older than 40 ms are refreshed. Moving shadows may lag slightly.
+    Stereo/custom-frustum and shadow-debug views always update.
 ShadowSoftShadowsTooltip: "Smooth shadow edges with an eight-sample filter. Increases shadow sampling cost."
 ActorShadows: "Enable Actor Shadows"
 ActorShadowsTooltip: "Enable shadows for NPCs and creatures besides the player character. May have a minor performance impact."

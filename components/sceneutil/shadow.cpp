@@ -70,6 +70,11 @@ namespace SceneUtil
         mShadowTechnique->setSplitPointUniformLogarithmicRatio(settings.mSplitPointUniformLogarithmicRatio);
         mShadowTechnique->setSplitPointDeltaBias(settings.mSplitPointBias);
 
+        mShadowTechnique->setShadowUpdateInterval(settings.mShadowUpdateInterval);
+        mShadowTechnique->setFrustumExpansion(
+            settings.mShadowFrustumExpansionBase, settings.mShadowFrustumExpansionPerSkip);
+        mShadowTechnique->invalidateShadowMaps();
+
         mShadowTechnique->setPolygonOffset(settings.mPolygonOffsetFactor, settings.mPolygonOffsetUnits);
 
         if (settings.mUseFrontFaceCulling)
@@ -218,6 +223,10 @@ namespace SceneUtil
 
     void ShadowManager::enableIndoorMode(const Settings::ShadowsCategory& settings)
     {
+        // Weather repeats this call every indoor frame.
+        if (!mIndoorMode)
+            mShadowTechnique->invalidateShadowMaps();
+        mIndoorMode = true;
         if (settings.mEnableIndoorShadows)
             mShadowSettings->setCastsShadowTraversalMask(mIndoorShadowCastingMask);
         else
@@ -226,6 +235,9 @@ namespace SceneUtil
 
     void ShadowManager::enableOutdoorMode()
     {
+        if (mIndoorMode)
+            mShadowTechnique->invalidateShadowMaps();
+        mIndoorMode = false;
         if (mEnableShadows)
             mShadowTechnique->enableShadows();
         mShadowSettings->setCastsShadowTraversalMask(mOutdoorShadowCastingMask);

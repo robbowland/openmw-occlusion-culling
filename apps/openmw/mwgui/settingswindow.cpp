@@ -313,6 +313,7 @@ namespace MWGui
         getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
         getWidget(mObjectShadowsButton, "ObjectShadowsButton");
         getWidget(mShadowMapResolution, "ShadowMapResolution");
+        getWidget(mShadowUpdateInterval, "ShadowUpdateInterval");
 
 #ifndef WIN32
         // hide gamma controls since it currently does not work under Linux
@@ -358,6 +359,8 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
         mShadowMapResolution->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowMapResolutionChanged);
+        mShadowUpdateInterval->eventComboChangePosition
+            += MyGUI::newDelegate(this, &SettingsWindow::onShadowUpdateIntervalChanged);
 
         mWindowModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWindowModeChanged);
         mVSyncModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onVSyncModeChanged);
@@ -421,6 +424,7 @@ namespace MWGui
         updateMaxLightsComboBox(mMaxLights);
 
         updateShadowMapResolutionComboBox(mShadowMapResolution);
+        mShadowUpdateInterval->setIndexSelected(Settings::shadows().mShadowUpdateInterval - 1);
 
         const Settings::WindowMode windowMode = Settings::video().mWindowMode;
         mWindowBorderButton->setEnabled(
@@ -747,6 +751,14 @@ namespace MWGui
                 break;
         }
 
+        apply();
+    }
+
+    void SettingsWindow::onShadowUpdateIntervalChanged(MyGUI::ComboBox* /*sender*/, size_t pos)
+    {
+        if (pos >= 4)
+            return;
+        Settings::shadows().mShadowUpdateInterval.set(static_cast<int>(pos + 1));
         apply();
     }
 
