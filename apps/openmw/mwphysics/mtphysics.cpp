@@ -286,7 +286,10 @@ namespace
                     // the "on ground" state of an actor might have been updated by a traceDown, don't overwrite the
                     // change
                     if (actor->getOnGround() == frameData.mWasOnGround)
+                    {
                         actor->setOnGround(frameData.mIsOnGround);
+                        actor->setVisualGroundNormal(frameData.mVisualGroundNormal);
+                    }
                     actor->setOnSlope(frameData.mIsOnSlope);
                     actor->setWalkingOnWater(frameData.mWalkingOnWater);
                     actor->setInertialForce(frameData.mInertia);

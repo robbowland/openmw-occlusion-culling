@@ -12,6 +12,9 @@
 
 #include "../mwmechanics/weapontype.hpp"
 
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
+
 #include "../mwworld/class.hpp"
 
 namespace MWRender
@@ -25,6 +28,21 @@ namespace MWRender
 
         if (!model.empty())
         {
+            const auto& id = ref->mBase->mId;
+            const bool trialCreature = id == ESM::RefId::stringRefId("rat")
+                || id == ESM::RefId::stringRefId("nix-hound") || id == ESM::RefId::stringRefId("kagouti");
+            if (Settings::game().mCreatureSlopeAlignment && trialCreature
+                && !(ref->mBase->mFlags & (ESM::Creature::Bipedal | ESM::Creature::Flies))
+                && (ref->mBase->mFlags & ESM::Creature::Walks))
+            {
+                mSlopeParent = mInsert;
+                mSlopeTransform = new osg::MatrixTransform;
+                mSlopeTransform->setDataVariance(osg::Object::DYNAMIC);
+                mSlopeParent->addChild(mSlopeTransform);
+                mInsert = mSlopeTransform;
+                mPreviousSlopePosition = ptr.getRefData().getPosition().asVec3();
+                mSlopeDebug = Settings::game().mCreatureSlopeDebug;
+            }
             setObjectRoot(model, false, false, true);
 
             if ((ref->mBase->mFlags & ESM::Creature::Bipedal))
@@ -33,6 +51,49 @@ namespace MWRender
             if (animated)
                 addAnimSource(model, model);
         }
+    }
+
+    CreatureAnimation::~CreatureAnimation()
+    {
+        removeFromScene();
+    }
+
+    void CreatureAnimation::removeFromScene()
+    {
+        ActorAnimation::removeFromScene();
+        if (mSlopeParent && mSlopeTransform)
+            mSlopeParent->removeChild(mSlopeTransform);
+    }
+
+    osg::Vec3f CreatureAnimation::runAnimation(float duration)
+    {
+        // Root motion remains in model coordinates, independent of visual tilt.
+        const osg::Vec3f movement = ActorAnimation::runAnimation(duration);
+        if (mSlopeTransform)
+        {
+            const auto& position = mPtr.getRefData().getPosition();
+            if ((position.asVec3() - mPreviousSlopePosition).length2() > 256.f * 256.f)
+                mSlope.reset();
+            mPreviousSlopePosition = position.asVec3();
+            const osg::Quat yaw(position.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
+            const osg::Vec3f normal = MWBase::Environment::get().getWorld()->getActorVisualGroundNormal(mPtr);
+            const osg::Quat tilt = mSlope.update(normal, yaw, duration);
+            mSlopeTransform->setMatrix(osg::Matrix::rotate(tilt));
+            if (mSlopeDebug && duration > 0.f)
+            {
+                mSlopeLogTimer += duration;
+                if (mSlopeLogTimer >= 1.f)
+                {
+                    mSlopeLogTimer = 0.f;
+                    const osg::Vec3f renderedUp = yaw * (tilt * osg::Vec3f(0.f, 0.f, 1.f));
+                    Log(Debug::Info) << "SLOPE_POSE id=" << mPtr.getCellRef().getRefId()
+                        << " pos=" << position.pos[0] << "," << position.pos[1] << "," << position.pos[2]
+                        << " normal=" << normal.x() << "," << normal.y() << "," << normal.z()
+                        << " renderedUp=" << renderedUp.x() << "," << renderedUp.y() << "," << renderedUp.z();
+                }
+            }
+        }
+        return movement;
     }
 
     CreatureWeaponAnimation::CreatureWeaponAnimation(

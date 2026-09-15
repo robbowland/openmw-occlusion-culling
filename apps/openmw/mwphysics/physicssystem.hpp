@@ -86,6 +86,7 @@ namespace MWPhysics
         const btCollisionObject* mStandingOn;
         bool mIsOnGround;
         bool mIsOnSlope;
+        osg::Vec3f mVisualGroundNormal{ 0.f, 0.f, 1.f };
         bool mWalkingOnWater;
         const bool mInert;
         btCollisionObject* mCollisionObject;

@@ -40,6 +40,9 @@ namespace Settings
         SettingValue<bool> mRebalanceSoulGemValues{ mIndex, "Game", "rebalance soul gem values" };
         SettingValue<bool> mUseAdditionalAnimSources{ mIndex, "Game", "use additional anim sources" };
         SettingValue<bool> mSmoothAnimTransitions{ mIndex, "Game", "smooth animation transitions" };
+        // Prototype is opt-in and restart-scoped. Keep a fallback for existing app resources.
+        SettingValue<bool> mCreatureSlopeAlignment{ mIndex, "Game", "creature slope alignment", false };
+        SettingValue<bool> mCreatureSlopeDebug{ mIndex, "Game", "creature slope debug", false };
         SettingValue<bool> mBarterDispositionChangeIsPermanent{ mIndex, "Game",
             "barter disposition change is permanent" };
         SettingValue<int> mStrengthInfluencesHandToHand{ mIndex, "Game", "strength influences hand to hand",

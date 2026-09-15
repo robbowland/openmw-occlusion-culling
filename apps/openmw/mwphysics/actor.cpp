@@ -284,6 +284,8 @@ namespace MWPhysics
     void Actor::setOnGround(bool grounded)
     {
         mOnGround = grounded;
+        if (!grounded)
+            mVisualGroundNormal.set(0.f, 0.f, 1.f);
     }
 
     void Actor::setOnSlope(bool slope)

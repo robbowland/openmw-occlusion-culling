@@ -99,6 +99,7 @@ namespace MWPhysics
         }
 
         actor->setOnGround(true);
+        actor->setVisualGroundNormal(osg::Vec3f(0.f, 0.f, 1.f));
 
         // Check if we actually found a valid spawn point (use an infinitely thin ray this time).
         // Required for some broken door destinations in Morrowind.esm, where the spawn point
@@ -117,10 +118,14 @@ namespace MWPhysics
                 || !isWalkableSlope(tracer.mPlaneNormal)))
         {
             actor->setOnSlope(!isWalkableSlope(resultCallback1.m_hitNormalWorld));
+            if (!actor->getOnSlope())
+                actor->setVisualGroundNormal(Misc::Convert::toOsg(resultCallback1.m_hitNormalWorld));
             return Misc::Convert::toOsg(resultCallback1.m_hitPointWorld) + osg::Vec3f(0.f, 0.f, sGroundOffset);
         }
 
         actor->setOnSlope(!isWalkableSlope(tracer.mPlaneNormal));
+        if (!actor->getOnSlope())
+            actor->setVisualGroundNormal(tracer.mPlaneNormal);
 
         return tracer.mEndPos - offset + osg::Vec3f(0.f, 0.f, sGroundOffset);
     }
@@ -130,6 +135,7 @@ namespace MWPhysics
     {
         // Reset per-frame data
         actor.mWalkingOnWater = false;
+        actor.mVisualGroundNormal.set(0.f, 0.f, 1.f);
         // Anything to collide with?
         if (actor.mSkipCollisionDetection)
         {
@@ -389,6 +395,8 @@ namespace MWPhysics
                 {
                     isOnGround = true;
                     isOnSlope = !isWalkableSlope(tracer.mPlaneNormal);
+                    if (!isOnSlope && !actor.mFlying)
+                        actor.mVisualGroundNormal = tracer.mPlaneNormal;
                     actor.mStandingOn = tracer.mHitObject;
 
                     if (actor.mStandingOn->getBroadphaseHandle()->m_collisionFilterGroup == CollisionType_Water)
@@ -422,6 +430,7 @@ namespace MWPhysics
             {
                 isOnGround = true;
                 isOnSlope = false;
+                actor.mVisualGroundNormal.set(0.f, 0.f, 1.f);
             }
         }
 

@@ -124,6 +124,10 @@ namespace MWPhysics
 
         bool getOnSlope() const { return mOnSlope; }
 
+        // Main-thread snapshot of the support plane, used only for visual posing.
+        void setVisualGroundNormal(const osg::Vec3f& normal) { mVisualGroundNormal = normal; }
+        osg::Vec3f getVisualGroundNormal() const { return mVisualGroundNormal; }
+
         /// Sets whether this actor should be able to collide with the water surface
         void setCanWaterWalk(bool waterWalk);
 
@@ -185,6 +189,7 @@ namespace MWPhysics
         osg::Vec3f mForce;
         bool mOnGround;
         bool mOnSlope;
+        osg::Vec3f mVisualGroundNormal{ 0.f, 0.f, 1.f };
         bool mInternalCollisionMode;
         bool mExternalCollisionMode;
         bool mActive;

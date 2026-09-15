@@ -364,6 +364,9 @@ namespace MWBase
         virtual bool isWaterWalkingCastableOnTarget(const MWWorld::ConstPtr& target) const = 0;
         virtual bool isOnGround(const MWWorld::Ptr& ptr) const = 0;
 
+        /// Cached support plane for rendering only; neutral when not standing on solid ground.
+        virtual osg::Vec3f getActorVisualGroundNormal(const MWWorld::Ptr& ptr) const = 0;
+
         virtual osg::Matrixf getActorHeadTransform(const MWWorld::ConstPtr& actor) const = 0;
 
         virtual MWRender::Camera* getCamera() = 0;

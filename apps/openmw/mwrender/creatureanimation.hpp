@@ -5,6 +5,9 @@
 #include "actoranimation.hpp"
 #include "weaponanimation.hpp"
 
+#include <components/sceneutil/creatureslope.hpp>
+#include <osg/MatrixTransform>
+
 namespace MWWorld
 {
     class Ptr;
@@ -17,7 +20,17 @@ namespace MWRender
     public:
         CreatureAnimation(
             const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem, bool animated);
-        virtual ~CreatureAnimation() {}
+        ~CreatureAnimation() override;
+        osg::Vec3f runAnimation(float duration) override;
+        void removeFromScene() override;
+
+    private:
+        osg::ref_ptr<osg::Group> mSlopeParent;
+        osg::ref_ptr<osg::MatrixTransform> mSlopeTransform;
+        SceneUtil::CreatureSlope mSlope;
+        osg::Vec3f mPreviousSlopePosition;
+        bool mSlopeDebug = false;
+        float mSlopeLogTimer = 0.f;
     };
 
     // For creatures with weapons and shields

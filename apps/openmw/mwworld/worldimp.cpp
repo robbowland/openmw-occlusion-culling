@@ -2169,6 +2169,15 @@ namespace MWWorld
         return mPhysics->isOnGround(ptr);
     }
 
+    osg::Vec3f World::getActorVisualGroundNormal(const MWWorld::Ptr& ptr) const
+    {
+        const auto* actor = mPhysics->getActor(ptr);
+        if (!actor || !actor->getCollisionMode() || !actor->getOnGround() || actor->isWalkingOnWater()
+            || isFlying(ptr) || isSwimming(ptr) || ptr.getClass().getCreatureStats(ptr).isDead())
+            return osg::Vec3f(0.f, 0.f, 1.f);
+        return actor->getVisualGroundNormal();
+    }
+
     void World::togglePOV(bool force)
     {
         mRendering->getCamera()->toggleViewMode(force);
