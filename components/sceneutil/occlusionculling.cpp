@@ -9,15 +9,23 @@ namespace SceneUtil
 {
     OcclusionCuller::OcclusionCuller(unsigned int bufferWidth, unsigned int bufferHeight)
         : mMOC(nullptr)
+        , mMOCTerrainOnly(nullptr)
     {
+        // Width must be multiple of 8, height multiple of 4
+        bufferWidth = (bufferWidth + 7) & ~7u;
+        bufferHeight = (bufferHeight + 3) & ~3u;
+
         mMOC = MaskedOcclusionCulling::Create();
         if (mMOC)
         {
-            // Width must be multiple of 8, height multiple of 4
-            bufferWidth = (bufferWidth + 7) & ~7u;
-            bufferHeight = (bufferHeight + 3) & ~3u;
             mMOC->SetResolution(bufferWidth, bufferHeight);
             mMOC->SetNearClipPlane(0.1f);
+        }
+        mMOCTerrainOnly = MaskedOcclusionCulling::Create();
+        if (mMOCTerrainOnly)
+        {
+            mMOCTerrainOnly->SetResolution(bufferWidth, bufferHeight);
+            mMOCTerrainOnly->SetNearClipPlane(0.1f);
         }
     }
 
@@ -25,6 +33,8 @@ namespace SceneUtil
     {
         if (mMOC)
             MaskedOcclusionCulling::Destroy(mMOC);
+        if (mMOCTerrainOnly)
+            MaskedOcclusionCulling::Destroy(mMOCTerrainOnly);
     }
 
     void OcclusionCuller::beginFrame(const osg::Matrixd& viewMatrix, const osg::Matrixd& projectionMatrix)
@@ -34,6 +44,8 @@ namespace SceneUtil
             return;
 
         mMOC->ClearBuffer();
+        if (mMOCTerrainOnly)
+            mMOCTerrainOnly->ClearBuffer();
         mViewProjection = viewMatrix * projectionMatrix;
 
         const double* vpDouble = mViewProjection.ptr();
@@ -46,6 +58,36 @@ namespace SceneUtil
         mNumBuildingTris = 0;
         mNumBuildingVerts = 0;
         mFrameActive = true;
+    }
+
+    void OcclusionCuller::rasterizeTerrainOccluder(
+        const std::vector<osg::Vec3f>& worldPositions, const std::vector<unsigned int>& indices)
+    {
+        // Rasterize terrain into both buffers so buildings can be tested against
+        // terrain-only depth (via testVisibleAABBTerrainOnly).
+        rasterizeOccluder(worldPositions, indices);
+        if (!mFrameActive || !mMOCTerrainOnly || worldPositions.empty() || indices.empty())
+            return;
+
+        const int numTris = static_cast<int>(indices.size()) / 3;
+        if (numTris <= 0)
+            return;
+
+        const unsigned int vertexCount = static_cast<unsigned int>(worldPositions.size());
+        for (const auto idx : indices)
+            if (idx >= vertexCount)
+                return;
+
+        for (const auto& v : worldPositions)
+        {
+            float w = mVPFloat[3] * v.x() + mVPFloat[7] * v.y() + mVPFloat[11] * v.z() + mVPFloat[15];
+            if (!std::isfinite(w) || std::abs(w) < 1e-6f)
+                return;
+        }
+
+        MaskedOcclusionCulling::VertexLayout vtxLayout(12, 4, 8);
+        mMOCTerrainOnly->RenderTriangles(reinterpret_cast<const float*>(worldPositions.data()), indices.data(), numTris,
+            mVPFloat, MaskedOcclusionCulling::BACKFACE_NONE, MaskedOcclusionCulling::CLIP_PLANE_ALL, vtxLayout);
     }
 
     void OcclusionCuller::rasterizeOccluder(
@@ -156,14 +198,8 @@ namespace SceneUtil
         ++mNumBuildingOccluders;
     }
 
-    bool OcclusionCuller::testVisibleAABB(const osg::BoundingBox& worldBB) const
+    bool OcclusionCuller::testVisibleAABBImpl(MaskedOcclusionCulling* moc, const osg::BoundingBox& worldBB) const
     {
-        if (!mFrameActive)
-            return true;
-
-        ++mNumTested;
-
-        // Project all 8 AABB corners to clip space, find NDC screen rect + minimum w
         const osg::Vec3f corners[8] = {
             osg::Vec3f(worldBB.xMin(), worldBB.yMin(), worldBB.zMin()),
             osg::Vec3f(worldBB.xMax(), worldBB.yMin(), worldBB.zMin()),
@@ -225,14 +261,29 @@ namespace SceneUtil
         if (ndcMinX >= ndcMaxX || ndcMinY >= ndcMaxY)
             return true; // degenerate rect, assume visible
 
-        auto result = mMOC->TestRect(ndcMinX, ndcMinY, ndcMaxX, ndcMaxY, wMin);
+        auto result = moc->TestRect(ndcMinX, ndcMinY, ndcMaxX, ndcMaxY, wMin);
+        return result != MaskedOcclusionCulling::OCCLUDED;
+    }
 
-        if (result == MaskedOcclusionCulling::OCCLUDED)
-        {
+    bool OcclusionCuller::testVisibleAABBTerrainOnly(const osg::BoundingBox& worldBB) const
+    {
+        if (!mFrameActive || !mMOCTerrainOnly)
+            return true;
+        // No mNumTested/mNumOccluded tracking for terrain-only tests — those stats
+        // are for the main (full) buffer tests used to measure culling effectiveness.
+        return testVisibleAABBImpl(mMOCTerrainOnly, worldBB);
+    }
+
+    bool OcclusionCuller::testVisibleAABB(const osg::BoundingBox& worldBB) const
+    {
+        if (!mFrameActive)
+            return true;
+
+        ++mNumTested;
+        const bool visible = testVisibleAABBImpl(mMOC, worldBB);
+        if (!visible)
             ++mNumOccluded;
-            return false;
-        }
-        return true;
+        return visible;
     }
 
     void OcclusionCuller::computePixelDepthBuffer(float* depthData) const

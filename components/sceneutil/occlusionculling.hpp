@@ -24,14 +24,23 @@ namespace SceneUtil
         /// Clears the depth buffer and stores the view-projection matrix.
         void beginFrame(const osg::Matrixd& viewMatrix, const osg::Matrixd& projectionMatrix);
 
-        /// Rasterize world-space triangles as occluders into the depth buffer.
+        /// Rasterize terrain into the full buffer AND the terrain-only snapshot.
+        /// Call this only for terrain, before any building occluders are added.
+        void rasterizeTerrainOccluder(const std::vector<osg::Vec3f>& worldPositions, const std::vector<unsigned int>& indices);
+
+        /// Rasterize world-space triangles as occluders into the full buffer only (not the terrain snapshot).
+        /// Use for buildings.
         void rasterizeOccluder(const std::vector<osg::Vec3f>& worldPositions, const std::vector<unsigned int>& indices);
 
         /// Rasterize a world-space AABB as an occluder (12 triangles for 6 faces).
         void rasterizeAABBOccluder(const osg::BoundingBox& worldBB);
 
-        /// Test if a world-space AABB is visible (not fully occluded).
-        /// Returns true if the box may be visible, false if definitely occluded.
+        /// Test against the terrain-only depth buffer.
+        /// Use for cells and buildings — prevents buildings from false-occluding each other.
+        bool testVisibleAABBTerrainOnly(const osg::BoundingBox& worldBB) const;
+
+        /// Test against the full depth buffer (terrain + buildings).
+        /// Use for small objects in Pass 2.
         bool testVisibleAABB(const osg::BoundingBox& worldBB) const;
 
         bool isActive() const { return mMOC != nullptr; }
@@ -56,7 +65,10 @@ namespace SceneUtil
         void getResolution(unsigned int& width, unsigned int& height) const;
 
     private:
+        bool testVisibleAABBImpl(MaskedOcclusionCulling* moc, const osg::BoundingBox& worldBB) const;
+
         MaskedOcclusionCulling* mMOC;
+        MaskedOcclusionCulling* mMOCTerrainOnly; // terrain-only snapshot for building visibility tests
         osg::Matrixd mViewProjection;
         float mVPFloat[16] = {};
         bool mFrameActive = false;

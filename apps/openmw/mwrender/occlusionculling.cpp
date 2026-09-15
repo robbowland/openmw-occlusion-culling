@@ -379,7 +379,7 @@ namespace MWRender
             mTerrainOccluder->build(cv->getEyePoint(), mRadiusCells, mPositions, mIndices);
 
             if (!mPositions.empty())
-                mCuller->rasterizeOccluder(mPositions, mIndices);
+                mCuller->rasterizeTerrainOccluder(mPositions, mIndices);
         }
 
         // Continue normal cull traversal — CellOcclusionCallbacks will test against the buffer
@@ -542,15 +542,17 @@ namespace MWRender
             return;
         }
 
-        // Test cell bounding box first — if fully occluded, skip entire cell
+        // Test cell bounding box against terrain-only depth — if fully hidden by terrain,
+        // skip entire cell. Use terrain-only so buildings in adjacent cells don't
+        // false-cull entire cells that are clearly in view.
         const osg::BoundingSphere& cellBS = node->getBound();
         if (cellBS.valid())
         {
             osg::BoundingBox cellBB;
             cellBB.expandBy(cellBS);
 
-            if (!mCuller->testVisibleAABB(cellBB))
-                return; // Entire cell occluded — no children traversed
+            if (!mCuller->testVisibleAABBTerrainOnly(cellBB))
+                return; // Entire cell hidden by terrain — no children traversed
         }
 
         const unsigned int numChildren = node->getNumChildren();
@@ -596,53 +598,55 @@ namespace MWRender
                     }
                 }
 
-                // Test chunk visibility against depth buffer (may now include its own occluders)
+                // Test chunk visibility against terrain-only depth — paged chunks are large
+                // geometry that should only be culled by terrain, not adjacent buildings.
                 osg::BoundingBox pageBB;
                 pageBB.expandBy(bs);
-                if (mCuller->testVisibleAABB(pageBB))
+                if (mCuller->testVisibleAABBTerrainOnly(pageBB))
                     child->accept(*cv);
                 continue;
             }
 
             // Get cached occluder mesh (with AABB for visibility test)
             const OccluderMesh& mesh = getOccluderMesh(child);
-            if (!mesh.aabb.valid())
-                continue;
 
-            if (mCuller->testVisibleAABB(mesh.aabb))
+            // Rasterize as occluder if in range and camera is not inside the building.
+            // Test against terrain-only buffer so other buildings don't prevent rasterization
+            // of adjacent buildings (which would reduce culling coverage for Pass 2).
+            if (mesh.aabb.valid() && mEnableStaticOccluders && !mesh.indices.empty()
+                && mCuller->testVisibleAABBTerrainOnly(mesh.aabb))
             {
-                if (mEnableStaticOccluders && !mesh.indices.empty())
+                float distSq = (bs.center() - cv->getEyePoint()).length2();
+                if (distSq < mOccluderMaxDistanceSq)
                 {
-                    // Skip rasterization for distant buildings — they cover few pixels
-                    // and terrain already handles far-distance occlusion
-                    float distSq = (bs.center() - cv->getEyePoint()).length2();
-                    if (distSq < mOccluderMaxDistanceSq)
+                    osg::Vec3f center = mesh.aabb.center();
+                    osg::Vec3f halfExtent
+                        = (osg::Vec3f(mesh.aabb.xMax(), mesh.aabb.yMax(), mesh.aabb.zMax()) - center)
+                        * mOccluderInsideThreshold;
+                    osg::BoundingBox scaledBB;
+                    scaledBB.expandBy(center - halfExtent);
+                    scaledBB.expandBy(center + halfExtent);
+                    if (!scaledBB.contains(cv->getEyePoint()))
                     {
-                        // Don't rasterize as occluder if camera is inside the (scaled) AABB
-                        osg::Vec3f center = mesh.aabb.center();
-                        osg::Vec3f halfExtent
-                            = (osg::Vec3f(mesh.aabb.xMax(), mesh.aabb.yMax(), mesh.aabb.zMax()) - center)
-                            * mOccluderInsideThreshold;
-                        osg::BoundingBox scaledBB;
-                        scaledBB.expandBy(center - halfExtent);
-                        scaledBB.expandBy(center + halfExtent);
-                        if (!scaledBB.contains(cv->getEyePoint()))
+                        unsigned int newTris = static_cast<unsigned int>(mesh.indices.size() / 3);
+                        if (mMaxTriangles == 0
+                            || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
                         {
-                            unsigned int newTris = static_cast<unsigned int>(mesh.indices.size() / 3);
-                            if (mMaxTriangles == 0
-                                || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
-                            {
-                                mCuller->rasterizeOccluder(mesh.vertices, mesh.indices);
-                                mCuller->incrementBuildingOccluders(
-                                    newTris, static_cast<unsigned int>(mesh.vertices.size()));
-                            }
+                            mCuller->rasterizeOccluder(mesh.vertices, mesh.indices);
+                            mCuller->incrementBuildingOccluders(
+                                newTris, static_cast<unsigned int>(mesh.vertices.size()));
                         }
                     }
                 }
-
-                child->accept(*cv);
             }
-            // else: occluded by terrain — skip entirely
+
+            // Always traverse large buildings. Do NOT gate traversal on testVisibleAABB —
+            // buildings testing against a buffer that includes previously rasterized
+            // buildings causes false culling (flickering) when child ordering happens to
+            // place one building in front of another in the depth buffer. Large buildings
+            // are correctly culled by PVS and the cell-level AABB test above; MSOC
+            // is reserved for culling small objects in Pass 2.
+            child->accept(*cv);
         }
 
         // Pass 2: Small objects — test against enriched depth buffer (terrain + buildings)
