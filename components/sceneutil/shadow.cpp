@@ -186,6 +186,9 @@ namespace SceneUtil
 
         definesWithShadows["limitShadowMapDistance"] = settings.mMaximumShadowMapDistance > 0 ? "1" : "0";
 
+        definesWithShadows["softShadows"] = settings.mSoftShadows ? "1" : "0";
+        definesWithShadows["shadowMapResolution"] = std::to_string(settings.mShadowMapResolution) + ".0";
+
         return definesWithShadows;
     }
 
@@ -206,6 +209,9 @@ namespace SceneUtil
         definesWithoutShadows["shadowNormalOffset"] = "0.0";
 
         definesWithoutShadows["limitShadowMapDistance"] = "0";
+
+        definesWithoutShadows["softShadows"] = "0";
+        definesWithoutShadows["shadowMapResolution"] = "1024.0";
 
         return definesWithoutShadows;
     }

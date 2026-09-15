@@ -234,6 +234,8 @@ WobblyShores: "Wobbly Shores"
 # Shadow settings
 
 Shadows: "Shadows"
+ShadowSoftShadows: "Soft Shadows"
+ShadowSoftShadowsTooltip: "Smooth shadow edges with an eight-sample filter. Increases shadow sampling cost."
 ActorShadows: "Enable Actor Shadows"
 ActorShadowsTooltip: "Enable shadows for NPCs and creatures besides the player character. May have a minor performance impact."
 PlayerShadows: "Enable Player Shadows"
