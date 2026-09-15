@@ -28,12 +28,9 @@ namespace MWRender
 
         if (!model.empty())
         {
-            const auto& id = ref->mBase->mId;
-            const bool trialCreature = id == ESM::RefId::stringRefId("rat")
-                || id == ESM::RefId::stringRefId("nix-hound") || id == ESM::RefId::stringRefId("kagouti");
-            if (Settings::game().mCreatureSlopeAlignment && trialCreature
-                && !(ref->mBase->mFlags & (ESM::Creature::Bipedal | ESM::Creature::Flies))
-                && (ref->mBase->mFlags & ESM::Creature::Walks))
+            if (Settings::game().mCreatureSlopeAlignment
+                && SceneUtil::CreatureSlope::eligible(ref->mBase->mFlags & ESM::Creature::Walks,
+                    ref->mBase->mFlags & ESM::Creature::Bipedal, ref->mBase->mFlags & ESM::Creature::Flies))
             {
                 mSlopeParent = mInsert;
                 mSlopeTransform = new osg::MatrixTransform;

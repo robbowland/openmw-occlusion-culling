@@ -13,6 +13,12 @@ namespace SceneUtil
     class CreatureSlope
     {
     public:
+        // Amphibious walkers may align on land; world contact validation rejects swimming.
+        static constexpr bool eligible(bool walks, bool bipedal, bool flies)
+        {
+            return walks && !bipedal && !flies;
+        }
+
         static osg::Quat target(osg::Vec3f normal)
         {
             if (!std::isfinite(normal.x()) || !std::isfinite(normal.y()) || !std::isfinite(normal.z())
