@@ -111,6 +111,7 @@ namespace MWWorld
 
         bool mSky;
         bool mGodMode;
+        SceneUtil::ItemSlopeParams mItemSlope;
         bool mScriptsEnabled;
         bool mDiscardMovements;
         std::vector<std::string> mContentFiles;
@@ -147,6 +148,11 @@ namespace MWWorld
 
         void updateWeather(float duration, bool paused = false);
 
+        // Rotates a freshly placed item about the point its base rests on, onto the surface normal.
+        Ptr alignPlacedItem(
+            const Ptr& item, const osg::Vec3f& pivot, const osg::Vec3f& normal, const SceneUtil::ItemSlopeParams& params);
+        // Moves an object so the centre of its bounding-box base sits on its current position.
+        Ptr centreBaseOnPosition(const Ptr& object);
         void initObjectInCell(const Ptr& ptr, CellStore& cell, bool adjustPos);
         Ptr moveObjectToCell(const Ptr& ptr, CellStore* cell, ESM::Position pos, bool adjustPos);
         Ptr copyObjectToCell(const ConstPtr& ptr, CellStore* cell, ESM::Position pos, int count, bool adjustPos);
@@ -455,6 +461,9 @@ namespace MWWorld
         bool isWaterWalkingCastableOnTarget(const MWWorld::ConstPtr& target) const override;
         bool isOnGround(const MWWorld::Ptr& ptr) const override;
         std::optional<osg::Vec3f> getActorVisualGroundNormal(const MWWorld::Ptr& ptr) const override;
+        void setItemGroundAlignment(const SceneUtil::ItemSlopeParams& params) override { mItemSlope = params; }
+        Ptr placeItemOnGround(const Ptr& item) override;
+        const SceneUtil::ItemSlopeParams& getItemGroundAlignment() const override { return mItemSlope; }
 
         osg::Matrixf getActorHeadTransform(const MWWorld::ConstPtr& actor) const override;
 

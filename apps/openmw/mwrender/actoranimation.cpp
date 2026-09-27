@@ -5,8 +5,10 @@
 #include <osg/Node>
 #include <osg/Vec4f>
 
+#include <components/debug/debuglog.hpp>
 #include <components/esm3/loadbody.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadligh.hpp>
 
 #include <components/resource/resourcesystem.hpp>
@@ -25,6 +27,7 @@
 #include <components/vfs/manager.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/drawstate.hpp"
@@ -59,6 +62,25 @@ namespace MWRender
 
         // Make sure we cleaned object from effects, just in cast if we re-use node
         removeEffects();
+
+        // The player is never posed: first person, the inventory preview and the camera rely on
+        // an upright model.
+        if (Settings::game().mCreatureSlopeAlignment && mPtr != MWMechanics::getPlayer())
+        {
+            if (mPtr.getType() == ESM::Creature::sRecordId)
+            {
+                const int flags = mPtr.get<ESM::Creature>()->mBase->mFlags;
+                mSlopeAliveEligible = SceneUtil::CreatureSlope::eligible(
+                    flags & ESM::Creature::Walks, flags & ESM::Creature::Bipedal, flags & ESM::Creature::Flies);
+            }
+            mSlopeParent = mInsert;
+            mSlopeTransform = new osg::MatrixTransform;
+            mSlopeTransform->setDataVariance(osg::Object::DYNAMIC);
+            mSlopeParent->addChild(mSlopeTransform);
+            mInsert = mSlopeTransform;
+            mPreviousSlopePosition = mPtr.getRefData().getPosition().asVec3();
+            mSlopeDebug = Settings::game().mCreatureSlopeDebug;
+        }
     }
 
     ActorAnimation::~ActorAnimation()
@@ -599,5 +621,143 @@ namespace MWRender
     {
         for (const auto& [k, v] : mItemLights)
             mInsert->removeChild(v);
+        if (mSlopeParent && mSlopeTransform)
+            mSlopeParent->removeChild(mSlopeTransform);
+    }
+
+    namespace
+    {
+        SceneUtil::CreatureSlope::Shape slopeShape()
+        {
+            switch (Settings::game().mActorCollisionShapeType)
+            {
+                case DetourNavigator::CollisionShapeType::RotatingBox:
+                    return SceneUtil::CreatureSlope::Shape::RotatingBox;
+                case DetourNavigator::CollisionShapeType::Cylinder:
+                    return SceneUtil::CreatureSlope::Shape::Cylinder;
+                case DetourNavigator::CollisionShapeType::Aabb:
+                    break;
+            }
+            return SceneUtil::CreatureSlope::Shape::Aabb;
+        }
+    }
+
+    void ActorAnimation::updateSlopePose(float duration)
+    {
+        if (!mSlopeTransform)
+            return;
+        const bool dead = mPtr.getClass().getCreatureStats(mPtr).isDead();
+        if (!dead && !mSlopeAliveEligible)
+        {
+            // Living NPCs and bipeds stay upright; only reset once (after a resurrection).
+            if (!mSlopeUpright)
+            {
+                mSlope.reset();
+                mSlopeSink = mSlopeSinkResidual = 0.f;
+                mSlopeOnTerrain = false;
+                mSlopeNormal.set(0.f, 0.f, 1.f);
+                mSlopeTransform->setMatrix(osg::Matrix::identity());
+                mSlopeUpright = true;
+            }
+            return;
+        }
+        mSlopeUpright = false;
+
+        const auto& position = mPtr.getRefData().getPosition();
+        const osg::Vec3f origin = position.asVec3();
+        if ((origin - mPreviousSlopePosition).length2() > 256.f * 256.f)
+        {
+            mSlope.reset();
+            mSlopeSinkResidual = 0.f;
+        }
+        mPreviousSlopePosition = origin;
+        const osg::Quat yaw(position.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+
+        SceneUtil::CreatureSlope::Params params = mSlopeParams;
+        if (dead)
+            params.mMaxLean = params.mCorpseMaxLean;
+
+        osg::Vec3f normal(0.f, 0.f, 1.f);
+        float sink = 0.f;
+        bool onTerrain = false;
+        if (params.mEnabled)
+        {
+            const std::optional<osg::Vec3f> contact = world->getActorVisualGroundNormal(mPtr);
+            const osg::Vec3f halfExtents = world->getHalfExtents(mPtr);
+            const MWWorld::CellStore* cell = mPtr.getCell();
+            if (contact && cell->isExterior())
+            {
+                // Terrain: fit the footprint and measure the real gap under the origin. Both are
+                // continuous while walking, unlike the contact triangle and the hull's step height.
+                const ESM::RefId worldspace = cell->getCell()->getWorldSpace();
+                const float sinYaw = std::sin(position.rot[2]);
+                const float cosYaw = std::cos(position.rot[2]);
+                const osg::Vec3f forward(sinYaw, cosYaw, 0.f);
+                const osg::Vec3f right(cosYaw, -sinYaw, 0.f);
+                const float halfLength = std::max(halfExtents.y(), 8.f);
+                const float halfWidth = std::max(halfExtents.x(), 8.f);
+                auto height = [&](const osg::Vec3f& point) { return world->getTerrainHeightAt(point, worldspace); };
+                const float gap = origin.z() - height(origin);
+                const osg::Vec3f fitted = SceneUtil::CreatureSlope::footprintNormal(forward, right, halfLength,
+                    halfWidth, height(origin + forward * halfLength), height(origin - forward * halfLength),
+                    height(origin + right * halfWidth), height(origin - right * halfWidth));
+                // Standing on terrain rather than a static above it: the origin is no higher than
+                // the upright hull can rest on this plane.
+                const float bound
+                    = SceneUtil::CreatureSlope::restingGap(halfExtents, slopeShape(), yaw, fitted) + 16.f;
+                if (gap > -8.f && gap < bound)
+                {
+                    onTerrain = true;
+                    normal = fitted;
+                    // The physics hull keeps a fixed ground offset even on flat ground.
+                    sink = params.mSink * std::max(0.f, gap - 1.f);
+                }
+            }
+            if (!onTerrain && contact)
+                normal = *contact;
+        }
+        const osg::Quat tilt = mSlope.update(normal, yaw, duration, params);
+        mSlopeNormal = normal;
+        if (!onTerrain && params.mSink > 0.f)
+            sink = mSlope.sinkOffset(world->getHalfExtents(mPtr), slopeShape(), yaw, params);
+        // Changing between the terrain and contact sources blends instead of popping.
+        if (onTerrain != mSlopeOnTerrain)
+            mSlopeSinkResidual = mSlopeSink - sink;
+        mSlopeOnTerrain = onTerrain;
+        if (std::isfinite(duration) && duration > 0.f)
+            mSlopeSinkResidual *= std::exp(-15.f * std::min(duration, 0.1f));
+        mSlopeSink = sink + mSlopeSinkResidual;
+        mSlopeTransform->setMatrix(osg::Matrix::rotate(tilt) * osg::Matrix::translate(0.f, 0.f, -mSlopeSink));
+        if (mSlopeDebug && duration > 0.f)
+        {
+            mSlopeLogTimer += duration;
+            if (mSlopeLogTimer >= 1.f)
+            {
+                mSlopeLogTimer = 0.f;
+                const osg::Vec3f renderedUp = yaw * (tilt * osg::Vec3f(0.f, 0.f, 1.f));
+                Log(Debug::Info) << "SLOPE_POSE id=" << mPtr.getCellRef().getRefId()
+                                 << " pos=" << position.pos[0] << "," << position.pos[1] << "," << position.pos[2]
+                                 << " normal=" << normal.x() << "," << normal.y() << "," << normal.z()
+                                 << " renderedUp=" << renderedUp.x() << "," << renderedUp.y() << ","
+                                 << renderedUp.z() << " sink=" << mSlopeSink << " terrain=" << onTerrain
+                                 << " dead=" << dead;
+            }
+        }
+    }
+
+    std::optional<Animation::GroundAlignmentState> ActorAnimation::getGroundAlignment() const
+    {
+        if (!mSlopeTransform)
+            return std::nullopt;
+        return GroundAlignmentState{ mSlopeParams, mSlopeNormal, mSlope.worldUp(), mSlopeSink, mSlopeOnTerrain };
+    }
+
+    bool ActorAnimation::setGroundAlignment(const SceneUtil::CreatureSlope::Params& params)
+    {
+        if (!mSlopeTransform)
+            return false;
+        mSlopeParams = params;
+        return true;
     }
 }

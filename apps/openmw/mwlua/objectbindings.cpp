@@ -111,7 +111,7 @@ namespace MWLua
         }
 
         void teleportNotPlayer(const MWWorld::Ptr& ptr, MWWorld::CellStore* destCell, const osg::Vec3f& pos,
-            const osg::Vec3f& rot, bool placeOnGround)
+            const osg::Vec3f& rot, bool placeOnGround, bool alignToGround = false)
         {
             MWBase::World* world = MWBase::Environment::get().getWorld();
             MWWorld::WorldModel* wm = MWBase::Environment::get().getWorldModel();
@@ -155,6 +155,9 @@ namespace MWLua
             }
             if (!newPtr.getRefData().isEnabled())
                 world->enable(newPtr);
+            // Needs the scene node, so only after enabling.
+            if (alignToGround && !cls.isActor())
+                newPtr = world->placeItemOnGround(newPtr);
             MWBase::Environment::get().getLuaManager()->objectTeleported(newPtr);
         }
 
@@ -522,6 +525,7 @@ namespace MWLua
                         throw std::runtime_error("Object is either removed or already in the process of teleporting");
                     osg::Vec3f rot = ptr.getRefData().getPosition().asRotationVec3();
                     bool placeOnGround = false;
+                    bool alignToGround = false;
                     if (LuaUtil::isTransform(options))
                         rot = toEulerRotation(options, ptr.getClass().isActor());
                     else if (options != sol::nil)
@@ -531,18 +535,19 @@ namespace MWLua
                         if (rotationArg != sol::nil)
                             rot = toEulerRotation(rotationArg, ptr.getClass().isActor());
                         placeOnGround = LuaUtil::getValueOrDefault(t["onGround"], placeOnGround);
+                        alignToGround = LuaUtil::getValueOrDefault(t["alignToGround"], alignToGround);
                     }
                     if (ptr.getContainerStore())
                     {
                         DelayedRemovalFn delayedRemovalFn = *removeFn(ptr, count);
                         context.mLuaManager->addAction(
-                            [object, cell, pos, rot, count, delayedRemovalFn, placeOnGround] {
+                            [object, cell, pos, rot, count, delayedRemovalFn, placeOnGround, alignToGround] {
                                 MWWorld::Ptr oldPtr = object.ptr();
                                 oldPtr.getCellRef().setCount(count);
                                 MWWorld::Ptr newPtr = oldPtr.getClass().moveToCell(oldPtr, *cell);
                                 oldPtr.getCellRef().setCount(0);
                                 newPtr.getRefData().disable();
-                                teleportNotPlayer(newPtr, cell, pos, rot, placeOnGround);
+                                teleportNotPlayer(newPtr, cell, pos, rot, placeOnGround, alignToGround);
                                 delayedRemovalFn(oldPtr);
                             },
                             "TeleportFromContainerAction");
@@ -554,9 +559,9 @@ namespace MWLua
                     {
                         ptr.getCellRef().setCount(0);
                         context.mLuaManager->addAction(
-                            [object, cell, pos, rot, count, placeOnGround] {
+                            [object, cell, pos, rot, count, placeOnGround, alignToGround] {
                                 object.ptr().getCellRef().setCount(count);
-                                teleportNotPlayer(object.ptr(), cell, pos, rot, placeOnGround);
+                                teleportNotPlayer(object.ptr(), cell, pos, rot, placeOnGround, alignToGround);
                             },
                             "TeleportAction");
                     }

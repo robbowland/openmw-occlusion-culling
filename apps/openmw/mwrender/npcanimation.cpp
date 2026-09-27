@@ -706,6 +706,7 @@ namespace MWRender
     osg::Vec3f NpcAnimation::runAnimation(float timepassed)
     {
         osg::Vec3f ret = Animation::runAnimation(timepassed);
+        updateSlopePose(timepassed);
 
         mHeadAnimationTime->update(timepassed);
 

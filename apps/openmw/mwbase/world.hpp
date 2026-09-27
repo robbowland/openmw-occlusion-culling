@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <components/misc/rng.hpp>
+#include <components/sceneutil/creatureslope.hpp>
 #include <components/vfs/pathutil.hpp>
 
 #include "../mwworld/doorstate.hpp"
@@ -369,8 +370,15 @@ namespace MWBase
 
         /// Cached support plane for rendering only; neutral when not standing on solid ground.
         /// Empty when the actor cannot rest on the ground at all (no collision, water walking,
-        /// flying, swimming or dead).
+        /// flying or swimming). Corpses are included.
         virtual std::optional<osg::Vec3f> getActorVisualGroundNormal(const MWWorld::Ptr& ptr) const = 0;
+
+        /// How dropped and placed items are rotated onto the surface they land on.
+        virtual void setItemGroundAlignment(const SceneUtil::ItemSlopeParams& params) = 0;
+        virtual const SceneUtil::ItemSlopeParams& getItemGroundAlignment() const = 0;
+        /// Drops an item straight down onto the surface under it, as an actor's drop would, and
+        /// aligns it to that surface. Returns the updated Ptr.
+        virtual MWWorld::Ptr placeItemOnGround(const MWWorld::Ptr& item) = 0;
 
         virtual osg::Matrixf getActorHeadTransform(const MWWorld::ConstPtr& actor) const = 0;
 

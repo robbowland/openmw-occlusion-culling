@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace SceneUtil
 {
     // Per-actor tuning, exposed to Lua through openmw.animation. Defaults reproduce the
     // original fixed behaviour: 25 degree lean cap, 45 degree support limit, rate 10, no sink.
+    // Corpses lie flat against the ground, so they may lean further (35 degrees).
     // Declared outside CreatureSlope so it can be a complete type in default arguments.
     struct CreatureSlopeParams
     {
@@ -19,6 +21,16 @@ namespace SceneUtil
         float mMinSupportZ = 0.70710678f; // cosine of the steepest accepted support normal
         float mResponsiveness = 10.f; // exponential approach rate, per second
         float mSink = 0.f; // fraction of the collision-shape slope gap to lower the model by
+        float mCorpseMaxLean = 0.61086524f; // radians; replaces mMaxLean once the actor is dead
+    };
+
+    // Dropped and placed items: a one-off, saved rotation onto the surface they land on.
+    // Controlled from Lua (openmw.world.setItemGroundAlignment); off unless a script enables it.
+    struct ItemSlopeParams
+    {
+        bool mEnabled = false;
+        float mMaxTilt = 0.52359878f; // radians; steeper surfaces are capped to this tilt
+        float mMinSupportZ = 0.70710678f; // cosine; surfaces steeper than 45 degrees leave items upright
     };
 
     // Visual-only pose. Smooth in world space so turning does not drag the slope around.
@@ -112,6 +124,26 @@ namespace SceneUtil
                 || normal.normalize() < 0.0001f)
                 return osg::Vec3f(0.f, 0.f, 1.f);
             return normal;
+        }
+
+        // Tilt that turns world up toward a surface normal for an item, or identity when the item
+        // should stay upright.
+        static osg::Quat itemTilt(const osg::Vec3f& normal, const ItemSlopeParams& params)
+        {
+            if (!params.mEnabled)
+                return {};
+            Params pose;
+            pose.mMaxLean = params.mMaxTilt;
+            pose.mMinSupportZ = params.mMinSupportZ;
+            return target(normal, pose);
+        }
+
+        // Rotates an object about the point its base rests on, so that point stays in contact.
+        // OSG composition: the result applies the object's rotation, then the tilt.
+        static std::pair<osg::Vec3f, osg::Quat> tiltAbout(
+            const osg::Vec3f& origin, const osg::Quat& rotation, const osg::Vec3f& pivot, const osg::Quat& tilt)
+        {
+            return { pivot + tilt * (origin - pivot), rotation * tilt };
         }
 
         osg::Vec3f worldUp() const { return mWorldTilt * osg::Vec3f(0.f, 0.f, 1.f); }

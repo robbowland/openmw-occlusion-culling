@@ -211,9 +211,10 @@
 -- @return #boolean 
 
 ---
--- Set visual ground (slope) alignment parameters for a creature. Only walking, non-bipedal,
--- non-flying creatures with `[Game] creature slope alignment` enabled have a slope pose; for any
--- other actor this does nothing and returns false. Omitted fields keep their current values.
+-- Set visual ground (slope) alignment parameters for an actor. With `[Game] creature slope
+-- alignment` enabled, every actor except the player has a slope pose: living walking, non-bipedal,
+-- non-flying creatures are posed, and every actor's corpse is posed; living NPCs and bipeds stay
+-- upright. Returns false when the actor has no slope pose. Omitted fields keep their current values.
 -- Changes are applied on the next frame and last until the actor's animation is rebuilt, so
 -- scripts should reapply them in onActive.
 -- @function [parent=#animation] setGroundAlignment
@@ -228,14 +229,16 @@
 --     the model by, so it meets the slope instead of hovering (default: 0). On exterior terrain the
 --     gap is measured under the origin and the lean follows a plane fitted to the footprint; on
 --     statics and in interiors both come from the physics contact.
+--   * `corpseMaxLean` - a number of degrees, 0 to 45, replacing `maxLean` once the actor is dead
+--     (default: 35)
 -- @return #boolean true if the actor has a slope pose
 -- @usage animation.setGroundAlignment(self, { sink = 1, maxLean = 20 })
 
 ---
--- Get a creature's ground alignment parameters and current pose, or nil if it has no slope pose.
+-- Get an actor's ground alignment parameters and current pose, or nil if it has no slope pose.
 -- @function [parent=#animation] getGroundAlignment
 -- @param openmw.core#GameObject actor
--- @return #table `enabled`, `maxLean`, `maxSupport`, `responsiveness`, `sink`, plus `normal` (support
+-- @return #table `enabled`, `maxLean`, `maxSupport`, `responsiveness`, `sink`, `corpseMaxLean`, plus `normal` (support
 -- normal this frame), `up` (smoothed rendered up direction), `sinkOffset` (units lowered) and
 -- `onTerrain` (true when the pose is fitted to terrain rather than the physics contact)
 

@@ -265,6 +265,9 @@ namespace MWLua
                 params.mResponsiveness = std::clamp(static_cast<float>(*responsiveness), 0.1f, 60.f);
             if (auto sink = options.get<sol::optional<Misc::FiniteFloat>>("sink"))
                 params.mSink = std::clamp(static_cast<float>(*sink), 0.f, 2.f);
+            if (auto corpseMaxLean = options.get<sol::optional<Misc::FiniteFloat>>("corpseMaxLean"))
+                params.mCorpseMaxLean
+                    = osg::DegreesToRadians(std::clamp(static_cast<float>(*corpseMaxLean), 0.f, 45.f));
             context.mLuaManager->addAction(
                 [object = Object(object), params] { getMutableAnimationOrThrow(object)->setGroundAlignment(params); },
                 "setGroundAlignmentAction");
@@ -282,6 +285,7 @@ namespace MWLua
                 = osg::RadiansToDegrees(std::acos(std::clamp(state->mParams.mMinSupportZ, -1.f, 1.f)));
             result["responsiveness"] = state->mParams.mResponsiveness;
             result["sink"] = state->mParams.mSink;
+            result["corpseMaxLean"] = osg::RadiansToDegrees(state->mParams.mCorpseMaxLean);
             result["normal"] = state->mNormal;
             result["up"] = state->mUp;
             result["sinkOffset"] = state->mSinkOffset;

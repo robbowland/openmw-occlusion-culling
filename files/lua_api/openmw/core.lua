@@ -267,6 +267,7 @@
 -- @type TeleportOptions
 -- @field openmw.util#Transform rotation New rotation; if missing, then the current rotation is used.
 -- @field #boolean onGround If true, adjust destination position to the ground.
+-- @field #boolean alignToGround Items only: if true, drop the item straight down onto the surface under the destination, as an actor's drop would, and tilt it to that surface (see @{openmw.world#setItemGroundAlignment} for the limits).
 
 ---
 -- Moves an object into a container or an inventory. Enables if was disabled.

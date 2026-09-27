@@ -1929,12 +1929,15 @@ namespace MWWorld
         // copy the object and set its count
         Ptr dropped
             = copy ? copyObjectToCell(object, cell, pos, amount, true) : moveObjectToCell(object, cell, pos, true);
+        if (result.mHit)
+            dropped = alignPlacedItem(dropped, pos.asVec3(), result.mHitNormalWorld, mItemSlope);
 
         // only the player place items in the world, so no need to check actor
         PCDropped(dropped);
 
+        const ESM::Position& placed = dropped.getRefData().getPosition();
         MWBase::Environment::get().getLuaManager()->objectPlaced(
-            dropped, getPlayerPtr(), pos.asVec3(), Misc::Convert::makeOsgQuat(pos.rot));
+            dropped, getPlayerPtr(), placed.asVec3(), Misc::Convert::makeOsgQuat(placed.rot));
 
         return dropped;
     }
@@ -2011,25 +2014,63 @@ namespace MWWorld
         }
 
         if (!object.getClass().isActor() && adjustPos && object.getRefData().getBaseNode())
-        {
-            // Adjust position so the location we wanted ends up in the middle of the object bounding box
-            osg::ComputeBoundsVisitor computeBounds;
-            computeBounds.setTraversalMask(~MWRender::Mask_ParticleSystem);
-            object.getRefData().getBaseNode()->accept(computeBounds);
-            osg::BoundingBox bounds = computeBounds.getBoundingBox();
-            if (bounds.valid())
-            {
-                ESM::Position pos = object.getRefData().getPosition();
-                bounds.set(bounds._min - pos.asVec3(), bounds._max - pos.asVec3());
+            centreBaseOnPosition(object);
+    }
 
-                osg::Vec3f adjust(
-                    (bounds.xMin() + bounds.xMax()) / 2, (bounds.yMin() + bounds.yMax()) / 2, bounds.zMin());
-                pos.pos[0] -= adjust.x();
-                pos.pos[1] -= adjust.y();
-                pos.pos[2] -= adjust.z();
-                moveObject(object, pos.asVec3());
-            }
-        }
+    Ptr World::centreBaseOnPosition(const Ptr& object)
+    {
+        // Adjust position so the location we wanted ends up in the middle of the object bounding box
+        osg::ComputeBoundsVisitor computeBounds;
+        computeBounds.setTraversalMask(~MWRender::Mask_ParticleSystem);
+        object.getRefData().getBaseNode()->accept(computeBounds);
+        osg::BoundingBox bounds = computeBounds.getBoundingBox();
+        if (!bounds.valid())
+            return object;
+        ESM::Position pos = object.getRefData().getPosition();
+        bounds.set(bounds._min - pos.asVec3(), bounds._max - pos.asVec3());
+
+        osg::Vec3f adjust((bounds.xMin() + bounds.xMax()) / 2, (bounds.yMin() + bounds.yMax()) / 2, bounds.zMin());
+        pos.pos[0] -= adjust.x();
+        pos.pos[1] -= adjust.y();
+        pos.pos[2] -= adjust.z();
+        return moveObject(object, pos.asVec3());
+    }
+
+    Ptr World::placeItemOnGround(const Ptr& item)
+    {
+        if (item.getClass().isActor() || !item.getRefData().getBaseNode() || !item.isInCell())
+            return item;
+        const osg::Vec3f position = item.getRefData().getPosition().asVec3();
+        const osg::Vec3f from = position + osg::Vec3f(0.f, 0.f, 20.f);
+        const MWWorld::Ptr ignore[] = { item };
+        const MWRender::RenderingManager::RayResult result
+            = mRendering->castRay(from, from - osg::Vec3f(0.f, 0.f, 1000.f), true, true, false, ignore);
+        if (!result.mHit)
+            return item;
+        const osg::Vec3f pivot(position.x(), position.y(), result.mHitPointWorld.z());
+        Ptr placed = centreBaseOnPosition(moveObject(item, pivot));
+        // An explicit request aligns even when automatic drop alignment is off.
+        SceneUtil::ItemSlopeParams params = mItemSlope;
+        params.mEnabled = true;
+        return alignPlacedItem(placed, pivot, result.mHitNormalWorld, params);
+    }
+
+    Ptr World::alignPlacedItem(
+        const Ptr& item, const osg::Vec3f& pivot, const osg::Vec3f& normal, const SceneUtil::ItemSlopeParams& params)
+    {
+        // initObjectInCell has already centred the upright base on the pivot; without a scene node
+        // (inactive cell) that did not happen, so leave the item as it is.
+        if (item.getClass().isActor() || !item.getRefData().getBaseNode())
+            return item;
+        const osg::Quat tilt = SceneUtil::CreatureSlope::itemTilt(normal, params);
+        if (tilt.zeroRotation())
+            return item;
+        const ESM::Position& pos = item.getRefData().getPosition();
+        const auto [origin, rotation]
+            = SceneUtil::CreatureSlope::tiltAbout(pos.asVec3(), Misc::Convert::makeOsgQuat(pos), pivot, tilt);
+        rotateObject(item, Misc::toEulerAnglesZYX(rotation), MWBase::RotationFlag_none);
+        // The pivot barely moves, but the origin can still cross into a neighbouring cell.
+        return moveObject(item, origin);
     }
 
     MWWorld::Ptr World::dropObjectOnGround(const Ptr& actor, const Ptr& object, int amount, bool copy)
@@ -2054,12 +2095,15 @@ namespace MWWorld
         // copy the object and set its count
         Ptr dropped
             = copy ? copyObjectToCell(object, cell, pos, amount, true) : moveObjectToCell(object, cell, pos, true);
+        if (result.mHit)
+            dropped = alignPlacedItem(dropped, pos.asVec3(), result.mHitNormalWorld, mItemSlope);
 
         if (actor == mPlayer->getPlayer()) // Only call if dropped by player
             PCDropped(dropped);
 
+        const ESM::Position& placed = dropped.getRefData().getPosition();
         MWBase::Environment::get().getLuaManager()->objectDropped(
-            dropped, actor, pos.asVec3(), Misc::Convert::makeOsgQuat(pos.rot));
+            dropped, actor, placed.asVec3(), Misc::Convert::makeOsgQuat(placed.rot));
 
         return dropped;
     }
@@ -2179,8 +2223,8 @@ namespace MWWorld
     std::optional<osg::Vec3f> World::getActorVisualGroundNormal(const MWWorld::Ptr& ptr) const
     {
         const auto* actor = mPhysics->getActor(ptr);
-        if (!actor || !actor->getCollisionMode() || actor->isWalkingOnWater() || isFlying(ptr) || isSwimming(ptr)
-            || ptr.getClass().getCreatureStats(ptr).isDead())
+        // Corpses still settle under physics with world collision, so they keep a support plane.
+        if (!actor || !actor->getCollisionMode() || actor->isWalkingOnWater() || isFlying(ptr) || isSwimming(ptr))
             return std::nullopt;
         if (!actor->getOnGround())
             return osg::Vec3f(0.f, 0.f, 1.f);

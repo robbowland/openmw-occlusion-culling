@@ -327,6 +327,28 @@ namespace MWLua
 
         api["vfx"] = initWorldVfxBindings(context);
 
+        api["setItemGroundAlignment"] = [context](const sol::table& options) {
+            SceneUtil::ItemSlopeParams params = MWBase::Environment::get().getWorld()->getItemGroundAlignment();
+            if (auto enabled = options.get<sol::optional<bool>>("enabled"))
+                params.mEnabled = *enabled;
+            if (auto maxTilt = options.get<sol::optional<Misc::FiniteFloat>>("maxTilt"))
+                params.mMaxTilt = osg::DegreesToRadians(std::clamp(static_cast<float>(*maxTilt), 0.f, 45.f));
+            if (auto maxSupport = options.get<sol::optional<Misc::FiniteFloat>>("maxSupport"))
+                params.mMinSupportZ
+                    = std::cos(osg::DegreesToRadians(std::clamp(static_cast<float>(*maxSupport), 0.f, 60.f)));
+            context.mLuaManager->addAction(
+                [params] { MWBase::Environment::get().getWorld()->setItemGroundAlignment(params); },
+                "setItemGroundAlignmentAction");
+        };
+        api["getItemGroundAlignment"] = [](sol::this_state lua) {
+            const SceneUtil::ItemSlopeParams& params = MWBase::Environment::get().getWorld()->getItemGroundAlignment();
+            sol::table result(lua, sol::create);
+            result["enabled"] = params.mEnabled;
+            result["maxTilt"] = osg::RadiansToDegrees(params.mMaxTilt);
+            result["maxSupport"] = osg::RadiansToDegrees(std::acos(std::clamp(params.mMinSupportZ, -1.f, 1.f)));
+            return result;
+        };
+
         return LuaUtil::makeReadOnly(api);
     }
 }

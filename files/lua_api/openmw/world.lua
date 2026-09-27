@@ -250,4 +250,22 @@
 -- @function [parent=#world] advanceTime
 -- @param #number hours Number of hours to advance time
 
+---
+-- Set how items dropped or placed into the world are rotated onto the surface they land on.
+-- Applies at the moment of the drop (the rotation is saved with the item); items already in the
+-- world are unchanged. Off by default. Not saved: scripts should reapply it in onInit and onLoad.
+-- Omitted fields keep their current values.
+-- @function [parent=#world] setItemGroundAlignment
+-- @param #table options A table of optional fields:
+--
+--   * `enabled` - a boolean (default: false)
+--   * `maxTilt` - a number of degrees, 0 to 45; steeper surfaces are capped to this tilt (default: 30)
+--   * `maxSupport` - a number of degrees, 0 to 60; items landing on steeper surfaces stay upright (default: 45)
+-- @usage world.setItemGroundAlignment({ enabled = true, maxTilt = 25 })
+
+---
+-- Get the current item ground alignment settings.
+-- @function [parent=#world] getItemGroundAlignment
+-- @return #table `enabled`, `maxTilt`, `maxSupport`
+
 return nil
