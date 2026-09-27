@@ -16,7 +16,6 @@
 #include <components/debug/gldebug.hpp>
 
 #include <components/misc/rng.hpp>
-#include <components/misc/strings/format.hpp>
 
 #include <components/vfs/manager.hpp>
 #include <components/vfs/registerarchives.hpp>
@@ -908,6 +907,7 @@ void OMW::Engine::prepareEngine()
             asyncListener.update();
         dataLoading.get();
     }
+    mSoundManager->warmStoreSounds();
     listener->loadingOff();
 
     mWorld->init(mMaxRecastLogLevel, mViewer, std::move(rootNode), mWorkQueue.get(), *mUnrefQueue);

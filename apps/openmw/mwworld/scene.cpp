@@ -442,7 +442,7 @@ namespace MWWorld
 
         if (cellVariant.isExterior())
         {
-            osg::ref_ptr<const ESMTerrain::LandObject> land = mRendering.getLandManager()->getLand(cellIndex);
+            std::shared_ptr<const ESMTerrain::LandObject> land = mRendering.getLandManager()->getLand(cellIndex);
             const ESM::LandData* data = land ? land->getData(ESM::Land::DATA_VHGT) : nullptr;
             const int verts = ESM::getLandSize(worldspace);
             const int worldsize = ESM::getCellSize(worldspace);
@@ -450,13 +450,13 @@ namespace MWWorld
             if (data)
             {
                 mPhysics->addHeightField(data->getHeights().data(), cellX, cellY, worldsize, verts,
-                    data->getMinHeight(), data->getMaxHeight(), land.get());
+                    data->getMinHeight(), data->getMaxHeight(), std::move(land));
             }
             else if (!ESM::isEsm4Ext(worldspace))
             {
                 static const std::vector<float> defaultHeight(verts * verts, ESM::Land::DEFAULT_HEIGHT);
                 mPhysics->addHeightField(defaultHeight.data(), cellX, cellY, worldsize, verts,
-                    ESM::Land::DEFAULT_HEIGHT, ESM::Land::DEFAULT_HEIGHT, land.get());
+                    ESM::Land::DEFAULT_HEIGHT, ESM::Land::DEFAULT_HEIGHT, std::move(land));
             }
             if (mPhysics->getHeightField(cellX, cellY))
             {
@@ -1193,15 +1193,9 @@ namespace MWWorld
 
             if (sqrDistToPlayer < mPreloadDistance * mPreloadDistance)
             {
-                try
-                {
-                    preloadCellWithSurroundings(mWorld.getWorldModel().getCell(door.getCellRef().getDestCell()));
-                }
-                catch (const std::exception& e)
-                {
-                    Log(Debug::Warning) << "Failed to schedule preload for door " << door.toString() << ": "
-                                        << e.what();
-                }
+                CellStore* dest = mWorld.getWorldModel().findCell(door.getCellRef().getDestCell());
+                if (dest != nullptr)
+                    preloadCellWithSurroundings(*dest);
             }
         }
     }

@@ -1,6 +1,9 @@
 #include "scriptscontainer.hpp"
 
+#include <cmath>
+
 #include "scripttracker.hpp"
+#include "util.hpp"
 
 #include <components/esm/luascripts.hpp>
 
@@ -419,12 +422,15 @@ namespace LuaUtil
             return;
         }
         const auto& loadedData = std::get<LoadedData>(mData);
+        const double currentRealTime = getRealTime();
         std::map<int, std::vector<ESM::LuaTimer>> timers;
         auto saveTimerFn = [&](const Timer& timer, TimerType timerType) {
             if (!timer.mSerializable)
                 return;
             ESM::LuaTimer savedTimer;
             savedTimer.mTime = timer.mTime;
+            if (timerType == TimerType::REAL_TIME)
+                savedTimer.mTime = timer.mTime > currentRealTime ? (timer.mTime - currentRealTime) : 0.0;
             savedTimer.mType = timerType;
             savedTimer.mCallbackName = std::get<std::string>(timer.mCallback);
             savedTimer.mCallbackArgument = timer.mSerializedArg;
@@ -434,6 +440,8 @@ namespace LuaUtil
             saveTimerFn(timer, TimerType::SIMULATION_TIME);
         for (const Timer& timer : loadedData.mGameTimersQueue)
             saveTimerFn(timer, TimerType::GAME_TIME);
+        for (const Timer& timer : loadedData.mRealTimeTimersQueue)
+            saveTimerFn(timer, TimerType::REAL_TIME);
         data.mScripts.clear();
         for (auto& [scriptId, script] : loadedData.mScripts)
         {
@@ -554,6 +562,8 @@ namespace LuaUtil
             data.mPublicInterfaces = sol::table(view.sol(), sol::create);
             addPackage("openmw.interfaces", makeReadOnly(data.mPublicInterfaces));
 
+            const double currentRealTime = getRealTime();
+
             for (const auto& [scriptId, scriptInfo] : scripts)
             {
                 std::optional<sol::function> onInit, onLoad;
@@ -584,7 +594,8 @@ namespace LuaUtil
                     timer.mCallback = savedTimer.mCallbackName;
                     timer.mSerializable = true;
                     timer.mScriptId = scriptId;
-                    timer.mTime = savedTimer.mTime;
+                    timer.mTime = savedTimer.mType == TimerType::REAL_TIME ? (currentRealTime + savedTimer.mTime)
+                                                                           : savedTimer.mTime;
 
                     try
                     {
@@ -597,6 +608,8 @@ namespace LuaUtil
 
                         if (savedTimer.mType == TimerType::GAME_TIME)
                             data.mGameTimersQueue.push_back(std::move(timer));
+                        else if (savedTimer.mType == TimerType::REAL_TIME)
+                            data.mRealTimeTimersQueue.push_back(std::move(timer));
                         else
                             data.mSimulationTimersQueue.push_back(std::move(timer));
                     }
@@ -610,6 +623,7 @@ namespace LuaUtil
 
         std::make_heap(data.mSimulationTimersQueue.begin(), data.mSimulationTimersQueue.end());
         std::make_heap(data.mGameTimersQueue.begin(), data.mGameTimersQueue.end());
+        std::make_heap(data.mRealTimeTimersQueue.begin(), data.mRealTimeTimersQueue.end());
 
         if (mTracker)
             mTracker->onLoad(*this);
@@ -660,6 +674,7 @@ namespace LuaUtil
                     variant.mEventHandlers.clear();
                     variant.mSimulationTimersQueue.clear();
                     variant.mGameTimersQueue.clear();
+                    variant.mRealTimeTimersQueue.clear();
                     variant.mPublicInterfaces.clear();
                 }
             },
@@ -698,7 +713,12 @@ namespace LuaUtil
         t.mArg = std::move(callbackArg);
         t.mSerializedArg = serialize(t.mArg, mSerializer);
         LoadedData& data = ensureLoaded();
-        insertTimer(type == TimerType::GAME_TIME ? data.mGameTimersQueue : data.mSimulationTimersQueue, std::move(t));
+
+        if (type == TimerType::REAL_TIME)
+            insertTimer(data.mRealTimeTimersQueue, std::move(t));
+        else
+            insertTimer(
+                type == TimerType::GAME_TIME ? data.mGameTimersQueue : data.mSimulationTimersQueue, std::move(t));
     }
 
     void ScriptsContainer::setupUnsavableTimer(
@@ -713,7 +733,12 @@ namespace LuaUtil
         getScript(t.mScriptId).mTemporaryCallbacks.emplace(mTemporaryCallbackCounter, std::move(callback));
         mTemporaryCallbackCounter++;
         LoadedData& data = ensureLoaded();
-        insertTimer(type == TimerType::GAME_TIME ? data.mGameTimersQueue : data.mSimulationTimersQueue, std::move(t));
+
+        if (type == TimerType::REAL_TIME)
+            insertTimer(data.mRealTimeTimersQueue, std::move(t));
+        else
+            insertTimer(
+                type == TimerType::GAME_TIME ? data.mGameTimersQueue : data.mSimulationTimersQueue, std::move(t));
     }
 
     void ScriptsContainer::callTimer(const Timer& t)
@@ -753,29 +778,29 @@ namespace LuaUtil
         }
     }
 
-    void ScriptsContainer::processTimers(double simulationTime, double gameTime)
+    void ScriptsContainer::processTimers(double simulationTime, double gameTime, double realTime)
     {
         mLua.protectedCall([&](LuaView& view) {
             LoadedData& data = ensureLoaded();
             updateTimerQueue(data.mSimulationTimersQueue, simulationTime);
             updateTimerQueue(data.mGameTimersQueue, gameTime);
+            updateTimerQueue(data.mRealTimeTimersQueue, realTime);
         });
     }
 
     static constexpr float instructionCountAvgCoef = 1.0f / 30; // averaging over approximately 30 frames
 
-    void ScriptsContainer::statsNextFrame()
+    float ScriptsContainer::decayedInstructionCount(const Script& script) const
     {
-        if (LoadedData* data = std::get_if<LoadedData>(&mData))
-        {
-            for (auto& [scriptId, script] : data->mScripts)
-            {
-                // The averaging formula is: averageValue = averageValue * (1-c) + newValue * c
-                script.mStats.mAvgInstructionCount *= 1 - instructionCountAvgCoef;
-                if (script.mStats.mAvgInstructionCount < 5)
-                    script.mStats.mAvgInstructionCount = 0; // speeding up converge to zero if newValue is zero
-            }
-        }
+        // averageValue = averageValue * (1-c) + newValue * c, once per frame. Frames the script
+        // sat out only decay it, so they fold into a single power instead of being walked.
+        constexpr float decayPerFrame = 1 - instructionCountAvgCoef;
+        const int64_t frames = mStatsFrame - script.mStatsFrame;
+        if (frames <= 0 || script.mStats.mAvgInstructionCount == 0)
+            return script.mStats.mAvgInstructionCount;
+        const float decay = frames == 1 ? decayPerFrame : std::pow(decayPerFrame, static_cast<float>(frames));
+        const float decayed = script.mStats.mAvgInstructionCount * decay;
+        return decayed < 5 ? 0 : decayed; // speeding up converge to zero if newValue is zero
     }
 
     void ScriptsContainer::addInstructionCount(int scriptId, int64_t instructionCount)
@@ -784,7 +809,12 @@ namespace LuaUtil
         {
             auto it = data->mScripts.find(scriptId);
             if (it != data->mScripts.end())
-                it->second.mStats.mAvgInstructionCount += instructionCount * instructionCountAvgCoef;
+            {
+                Script& script = it->second;
+                script.mStats.mAvgInstructionCount = decayedInstructionCount(script);
+                script.mStatsFrame = mStatsFrame;
+                script.mStats.mAvgInstructionCount += instructionCount * instructionCountAvgCoef;
+            }
         }
     }
 
@@ -824,7 +854,7 @@ namespace LuaUtil
         {
             for (auto& [id, script] : data->mScripts)
             {
-                stats[id].mAvgInstructionCount += script.mStats.mAvgInstructionCount;
+                stats[id].mAvgInstructionCount += decayedInstructionCount(script);
                 stats[id].mMemoryUsage += script.mStats.mMemoryUsage;
             }
         }
