@@ -19,6 +19,7 @@ namespace Settings
         using WithIndex::WithIndex;
 
         SettingValue<int> mAnisotropy{ mIndex, "General", "anisotropy", makeClampSanitizerInt(0, 16) };
+        SettingValue<bool> mPreferVertexBufferObjects{ mIndex, "General", "prefer vertex buffer objects" };
         SettingValue<std::string> mScreenshotFormat{ mIndex, "General", "screenshot format",
             makeEnumSanitizerString({ "jpg", "png", "tga" }) };
         SettingValue<std::string> mTextureMagFilter{ mIndex, "General", "texture mag filter",

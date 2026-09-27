@@ -15,11 +15,19 @@
 #include <osg/NodeVisitor>
 #include <osg/Transform>
 #include <osgUtil/CullVisitor>
+#include <osgUtil/RenderStage>
+
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <string>
 
 #include <components/debug/debuglog.hpp>
 #include <components/misc/constants.hpp>
 #include <components/sceneutil/occlusionculling.hpp>
 #include <components/terrain/terrainoccluder.hpp>
+
+#include "vismask.hpp"
 
 namespace
 {
@@ -132,6 +140,97 @@ namespace
 
         std::vector<osg::Matrix> mMatrixStack;
     };
+}
+
+
+namespace
+{
+    // Diagnostic (OPENMW_DRAW_CENSUS=1): classify the main camera's draw calls by the visibility
+    // mask of their nearest categorised ancestor, logged every 120 frames.
+    struct DrawCensus
+    {
+        struct Entry
+        {
+            unsigned int draws = 0;
+            unsigned long long vertices = 0;
+        };
+        std::map<std::string, Entry> byCategory;
+        std::vector<std::string> samples;
+
+        static std::string categoryOf(const osg::Drawable* drawable)
+        {
+            static const std::pair<unsigned int, const char*> masks[] = {
+                { MWRender::Mask_Actor, "actor" }, { MWRender::Mask_Player, "player" },
+                { MWRender::Mask_Groundcover, "groundcover" }, { MWRender::Mask_Terrain, "terrain" },
+                { MWRender::Mask_Static, "static" }, { MWRender::Mask_Object, "object" },
+                { MWRender::Mask_Water, "water" }, { MWRender::Mask_SimpleWater, "water" },
+                { MWRender::Mask_Sky, "sky" }, { MWRender::Mask_Effect, "effect" },
+                { MWRender::Mask_WeatherParticles, "weather" }, { MWRender::Mask_ParticleSystem, "particles" },
+            };
+            const osg::Node* node = drawable;
+            bool paged = false;
+            while (node)
+            {
+                if (node->getName() == "Chunk" || node->getName().rfind("Chunk", 0) == 0)
+                    paged = true;
+                for (const auto& [mask, name] : masks)
+                    if (node->getNodeMask() == mask || (node->getNodeMask() != ~0u && (node->getNodeMask() & mask)))
+                        return paged ? std::string(name) + "(paged)" : std::string(name);
+                node = node->getNumParents() > 0 ? node->getParent(0) : nullptr;
+            }
+            return paged ? "other(paged)" : "other";
+        }
+
+        void addStateGraph(const osgUtil::StateGraph* graph)
+        {
+            for (const auto& leaf : graph->_leaves)
+            {
+                const osg::Drawable* drawable = leaf->getDrawable();
+                if (!drawable)
+                    continue;
+                const std::string category = categoryOf(drawable);
+                if (category == "other" && samples.size() < 6)
+                {
+                    std::string chain;
+                    const osg::Node* node = drawable;
+                    for (int depth = 0; node && depth < 9; ++depth)
+                    {
+                        char mask[16];
+                        std::snprintf(mask, sizeof(mask), "%x", node->getNodeMask());
+                        chain += std::string(node->className()) + ":" + node->getName() + ":" + mask + " < ";
+                        node = node->getNumParents() > 0 ? node->getParent(0) : nullptr;
+                    }
+                    samples.push_back(chain);
+                }
+                Entry& entry = byCategory[category];
+                ++entry.draws;
+                if (const osg::Geometry* geometry = drawable->asGeometry())
+                    if (const osg::Array* vertices = geometry->getVertexArray())
+                        entry.vertices += vertices->getNumElements();
+            }
+            for (const auto& child : graph->_children)
+                addStateGraph(child.second.get());
+        }
+
+        void addBin(const osgUtil::RenderBin* bin)
+        {
+            for (const auto& graph : bin->getStateGraphList())
+                addStateGraph(graph);
+            for (const auto& leaf : bin->getRenderLeafList())
+            {
+                if (const osg::Drawable* drawable = leaf->getDrawable())
+                    ++byCategory[categoryOf(drawable)].draws;
+            }
+            for (const auto& child : bin->getRenderBinList())
+                addBin(child.second.get());
+        }
+    };
+
+    bool drawCensusEnabled()
+    {
+        static const bool enabled = std::getenv("OPENMW_DRAW_CENSUS") != nullptr;
+        return enabled;
+    }
 }
 
 namespace MWRender
@@ -388,6 +487,18 @@ namespace MWRender
         // End the occlusion frame so sub-camera traversals (water reflection/refraction,
         // shadow cameras) that share this scene graph don't incorrectly cull against
         // the main camera's occlusion buffer.
+        if (drawCensusEnabled() && cv->getFrameStamp()->getFrameNumber() % 120 == 0)
+        {
+            DrawCensus census;
+            census.addBin(cv->getCurrentRenderStage());
+            std::string line = "DRAW_CENSUS";
+            for (const auto& [category, entry] : census.byCategory)
+                line += " " + category + "=" + std::to_string(entry.draws) + "/" + std::to_string(entry.vertices);
+            Log(Debug::Info) << line;
+            for (const auto& sample : census.samples)
+                Log(Debug::Info) << "DRAW_CENSUS_OTHER " << sample;
+        }
+
         mCuller->endFrame();
 
         // Update debug overlay AFTER traversal (terrain + building occluders now in buffer)

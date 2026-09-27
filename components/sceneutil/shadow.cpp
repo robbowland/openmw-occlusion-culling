@@ -71,6 +71,8 @@ namespace SceneUtil
         mShadowTechnique->setSplitPointDeltaBias(settings.mSplitPointBias);
 
         mShadowTechnique->setShadowUpdateInterval(settings.mShadowUpdateInterval);
+        mShadowTechnique->setShadowReuseMaxAge(settings.mShadowReuseMaxAge);
+        mShadowTechnique->setShadowSmallFeatureCullingPixelSize(settings.mShadowSmallFeatureCullingPixelSize);
         mShadowTechnique->setFrustumExpansion(
             settings.mShadowFrustumExpansionBase, settings.mShadowFrustumExpansionPerSkip);
         mShadowTechnique->invalidateShadowMaps();

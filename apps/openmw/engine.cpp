@@ -732,6 +732,15 @@ void OMW::Engine::prepareEngine()
     mStateManager = std::make_unique<MWState::StateManager>(mCfgMgr.getUserDataPath() / "saves", mContentFiles);
     mEnvironment.setStateManager(*mStateManager);
 
+    // Vertex buffer objects instead of OSG's default display lists. Apple's OpenGL runs on Metal and
+    // emulates display lists slowly; VBOs cut exterior draw-submission time by roughly a quarter there.
+    // Must precede window realization and any geometry creation. OSG_VERTEX_BUFFER_HINT still wins.
+    if (Settings::general().mPreferVertexBufferObjects
+        && osg::DisplaySettings::instance()->getVertexBufferHint()
+            == osg::DisplaySettings::VertexBufferHint::NO_PREFERENCE)
+        osg::DisplaySettings::instance()->setVertexBufferHint(
+            osg::DisplaySettings::VertexBufferHint::VERTEX_BUFFER_OBJECT);
+
     const bool stereoEnabled = Settings::stereo().mStereoEnabled || osg::DisplaySettings::instance().get()->getStereo();
     mStereoManager = std::make_unique<Stereo::Manager>(
         mViewer, stereoEnabled, Settings::camera().mNearClip, Settings::camera().mViewingDistance);

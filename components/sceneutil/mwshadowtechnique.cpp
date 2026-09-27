@@ -588,7 +588,16 @@ MWShadowTechnique::ShadowData::ShadowData(MWShadowTechnique::ViewDependentData* 
     _camera->setComputeNearFarMode(osg::Camera::DO_NOT_COMPUTE_NEAR_FAR);
 
     // switch off small feature culling as this can cull out geometry that will still be large enough once perspective correction takes effect.
-    _camera->setCullingMode(_camera->getCullingMode() & ~osg::CullSettings::SMALL_FEATURE_CULLING);
+    // Opt-in: casters are culled with the final shadow projection, so a caster below this many shadow-map
+    // texels also casts below that many texels. Skips clutter (cups, plants) that cannot cast a visible shadow.
+    const float smallFeaturePixels = vdd->getViewDependentShadowMap()->getShadowSmallFeatureCullingPixelSize();
+    if (smallFeaturePixels > 0.f)
+    {
+        _camera->setCullingMode(_camera->getCullingMode() | osg::CullSettings::SMALL_FEATURE_CULLING);
+        _camera->setSmallFeatureCullingPixelSize(smallFeaturePixels);
+    }
+    else
+        _camera->setCullingMode(_camera->getCullingMode() & ~osg::CullSettings::SMALL_FEATURE_CULLING);
 
     // set viewport
     _camera->setViewport(0,0,textureSize.x(),textureSize.y());
@@ -844,6 +853,8 @@ MWShadowTechnique::MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::C
     _enableShadows = vdsm._enableShadows;
     mSetDummyStateWhenDisabled = vdsm.mSetDummyStateWhenDisabled;
     _shadowUpdateInterval = vdsm._shadowUpdateInterval;
+    _shadowReuseMaxAge = vdsm._shadowReuseMaxAge;
+    _shadowSmallFeatureCullingPixelSize = vdsm._shadowSmallFeatureCullingPixelSize;
     _frustumExpansionBase = vdsm._frustumExpansionBase;
     _frustumExpansionPerSkip = vdsm._frustumExpansionPerSkip;
 }
@@ -1173,7 +1184,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     const double currentTime = frameStamp ? frameStamp->getReferenceTime() : 0.0;
     if (!_customFrustumCallback && !_debugHud && frameStamp && vdd->numValidShadows() > 0
         && vdd->_shadowRevision == _shadowRevision && vdd->_reuseProjection == viewProjectionMatrix
-        && vdd->_shadowReuse.reuse(_shadowUpdateInterval, currentTime))
+        && vdd->_shadowReuse.reuse(_shadowUpdateInterval, currentTime, _shadowReuseMaxAge))
     {
         copyShadowStateSettings(cv, vdd);
         prepareStateSetForRenderingShadow(*vdd, cv.getTraversalNumber());

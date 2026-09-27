@@ -45,6 +45,10 @@ namespace Settings
         SettingValue<bool> mSoftShadows{ mIndex, "Shadows", "soft shadows" };
         SettingValue<int> mShadowUpdateInterval{ mIndex, "Shadows", "shadow update interval",
             makeClampSanitizerInt(1, 4) };
+        SettingValue<float> mShadowSmallFeatureCullingPixelSize{ mIndex, "Shadows",
+            "shadow small feature culling pixel size", makeClampSanitizerFloat(0.0, 16.0) };
+        SettingValue<float> mShadowReuseMaxAge{ mIndex, "Shadows", "shadow reuse max age",
+            makeClampSanitizerFloat(0.0, 0.25) };
         SettingValue<float> mShadowFrustumExpansionBase{ mIndex, "Shadows", "shadow frustum expansion base",
             makeClampSanitizerFloat(0.0, 0.15) };
         SettingValue<float> mShadowFrustumExpansionPerSkip{ mIndex, "Shadows", "shadow frustum expansion per skip",

@@ -284,6 +284,9 @@ namespace SceneUtil {
         void setWorldMask(unsigned int worldMask) { _worldMask = worldMask; }
 
         void setShadowUpdateInterval(unsigned int interval) { _shadowUpdateInterval = interval; }
+        void setShadowReuseMaxAge(double seconds) { _shadowReuseMaxAge = seconds; }
+        void setShadowSmallFeatureCullingPixelSize(float pixels) { _shadowSmallFeatureCullingPixelSize = pixels; }
+        float getShadowSmallFeatureCullingPixelSize() const { return _shadowSmallFeatureCullingPixelSize; }
         void setFrustumExpansion(double base, double perSkip)
         {
             _frustumExpansionBase = base;
@@ -333,6 +336,8 @@ namespace SceneUtil {
         unsigned int                            _worldMask = ~0u;
 
         unsigned int                            _shadowUpdateInterval = 1;
+        double                                  _shadowReuseMaxAge = 0.040;
+        float                                   _shadowSmallFeatureCullingPixelSize = 0.f;
         unsigned int                            _shadowRevision = 1;
         double                                  _frustumExpansionBase = 0.0;
         double                                  _frustumExpansionPerSkip = 0.0;
