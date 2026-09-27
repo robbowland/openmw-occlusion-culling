@@ -1,4 +1,9 @@
 #include "luastate.hpp"
+#include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <unordered_map>
+#include <mutex>
 
 #ifndef NO_LUAJIT
 #include <luajit.h>
@@ -21,6 +26,67 @@
 
 namespace LuaUtil
 {
+    namespace
+    {
+        struct ScriptTiming
+        {
+            std::mutex mMutex;
+            std::unordered_map<int, std::pair<std::chrono::steady_clock::duration, uint64_t>> mByScript;
+            unsigned mReports = 0;
+        };
+
+        ScriptTiming& scriptTiming()
+        {
+            static ScriptTiming timing;
+            return timing;
+        }
+    }
+
+    bool scriptTimingEnabled()
+    {
+        static const bool enabled = std::getenv("OPENMW_LUA_TIMING") != nullptr;
+        return enabled;
+    }
+
+    void recordScriptTime(int configIndex, std::chrono::steady_clock::duration elapsed)
+    {
+        ScriptTiming& timing = scriptTiming();
+        std::lock_guard lock(timing.mMutex);
+        auto& entry = timing.mByScript[configIndex];
+        entry.first += elapsed;
+        ++entry.second;
+    }
+
+    void reportScriptTiming(const ScriptsConfiguration& configuration)
+    {
+        // Called once per Lua update; reports the last 300 updates.
+        ScriptTiming& timing = scriptTiming();
+        std::lock_guard lock(timing.mMutex);
+        if (++timing.mReports < 300)
+            return;
+        std::vector<std::pair<std::chrono::steady_clock::duration, int>> sorted;
+        std::chrono::steady_clock::duration total{};
+        for (const auto& [index, entry] : timing.mByScript)
+        {
+            sorted.emplace_back(entry.first, index);
+            total += entry.first;
+        }
+        std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        const auto ms = [&](std::chrono::steady_clock::duration d) {
+            return std::chrono::duration<double, std::milli>(d).count() / timing.mReports;
+        };
+        Log(Debug::Info) << "LUA_TIMING frames=" << timing.mReports << " totalMsPerFrame=" << ms(total);
+        for (size_t i = 0; i < sorted.size() && i < 30; ++i)
+        {
+            const auto& [elapsed, index] = sorted[i];
+            Log(Debug::Info) << "LUA_TIMING " << ms(elapsed) << " ms/frame calls/frame="
+                             << static_cast<double>(timing.mByScript[index].second) / timing.mReports << " "
+                             << configuration[index].mScriptPath.value();
+        }
+        timing.mByScript.clear();
+        timing.mReports = 0;
+    }
+
     static VFS::Path::Normalized packageNameToVfsPath(std::string_view packageName, const VFS::Manager& vfs)
     {
         std::string pathValue(packageName);

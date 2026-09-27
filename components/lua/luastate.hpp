@@ -2,6 +2,7 @@
 #define COMPONENTS_LUA_LUASTATE_H
 
 #include <filesystem>
+#include <chrono>
 #include <map>
 #include <typeinfo>
 
@@ -251,10 +252,36 @@ namespace LuaUtil
         }
     }
 
+    // Diagnostic (OPENMW_LUA_TIMING=1): wall-clock time spent in each script's handlers, events, timers
+    // and callbacks, aggregated over every object running the script.
+    bool scriptTimingEnabled();
+    void recordScriptTime(int configIndex, std::chrono::steady_clock::duration elapsed);
+    void reportScriptTiming(const ScriptsConfiguration& configuration);
+
+    struct ScriptTimer
+    {
+        int mIndex = -1;
+        std::chrono::steady_clock::time_point mStart;
+        explicit ScriptTimer(const ScriptId& scriptId)
+        {
+            if (scriptId.mContainer && scriptTimingEnabled())
+            {
+                mIndex = scriptId.mIndex;
+                mStart = std::chrono::steady_clock::now();
+            }
+        }
+        ~ScriptTimer()
+        {
+            if (mIndex >= 0)
+                recordScriptTime(mIndex, std::chrono::steady_clock::now() - mStart);
+        }
+    };
+
     // Lua must be initialized through LuaUtil::LuaState, otherwise this function will segfault.
     template <typename... Args>
     sol::protected_function_result call(ScriptId scriptId, const sol::protected_function& fn, Args&&... args)
     {
+        const ScriptTimer timer(scriptId);
         LuaState* luaState = nullptr;
         if (LuaState::sProfilerEnabled && scriptId.mContainer)
         {

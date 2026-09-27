@@ -247,6 +247,8 @@ namespace MWLua
     {
         if (mPlayer.isEmpty())
             return; // The game is not started yet.
+        if (LuaUtil::scriptTimingEnabled())
+            LuaUtil::reportScriptTiming(mConfiguration);
 
         MWWorld::Ptr newPlayerPtr = MWBase::Environment::get().getWorld()->getPlayerPtr();
         if (!(getId(mPlayer) == getId(newPlayerPtr)))
