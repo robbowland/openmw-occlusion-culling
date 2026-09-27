@@ -34,6 +34,8 @@ namespace MWRender
         SceneUtil::CreatureSlope::Params mSlopeParams;
         osg::Vec3f mSlopeNormal{ 0.f, 0.f, 1.f };
         float mSlopeSink = 0.f;
+        float mSlopeSinkResidual = 0.f;
+        bool mSlopeOnTerrain = false;
         osg::Vec3f mPreviousSlopePosition;
         bool mSlopeDebug = false;
         float mSlopeLogTimer = 0.f;

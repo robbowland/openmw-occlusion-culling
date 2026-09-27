@@ -426,11 +426,12 @@ namespace MWPhysics
             }
             // forcibly treat stuck actors as if they're on flat ground because buggy collisions when inside of things
             // can/will break ground detection
+            // The visual normal is kept: it is only set above from a walkable non-actor contact, and the stuck
+            // counter is not cleared while an actor stands still, so resetting it here left idle actors unaligned.
             if (actor.mStuckFrames > 0)
             {
                 isOnGround = true;
                 isOnSlope = false;
-                actor.mVisualGroundNormal.set(0.f, 0.f, 1.f);
             }
         }
 

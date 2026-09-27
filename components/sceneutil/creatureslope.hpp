@@ -72,14 +72,10 @@ namespace SceneUtil
             return localTilt;
         }
 
-        // The collision shape stays upright, so on a slope it rests on its uphill edge and the
-        // model origin (the centre of the shape's base) hovers above the ground. Returns how far
-        // to lower the model, from the smoothed pose, so the base meets the slope plane.
-        float sinkOffset(const osg::Vec3f& halfExtents, Shape shape, const osg::Quat& yaw, const Params& params) const
+        // The collision shape stays upright, so on a plane with this normal it rests on its uphill
+        // edge and the origin (the centre of the shape's base) hovers above the plane by this much.
+        static float restingGap(const osg::Vec3f& halfExtents, Shape shape, const osg::Quat& yaw, osg::Vec3f up)
         {
-            if (params.mSink <= 0.f)
-                return 0.f;
-            osg::Vec3f up = worldUp();
             if (shape == Shape::RotatingBox)
                 up = yaw.inverse() * up;
             if (up.z() < 0.1f)
@@ -89,9 +85,33 @@ namespace SceneUtil
                 gap = halfExtents.x() * std::sqrt(up.x() * up.x() + up.y() * up.y()) / up.z();
             else
                 gap = (halfExtents.x() * std::abs(up.x()) + halfExtents.y() * std::abs(up.y())) / up.z();
-            if (!std::isfinite(gap))
+            return std::isfinite(gap) ? gap : 0.f;
+        }
+
+        // How far to lower the model, from the smoothed pose, so the base meets the slope plane.
+        // Used off terrain, where the actual gap under the origin is not known.
+        float sinkOffset(const osg::Vec3f& halfExtents, Shape shape, const osg::Quat& yaw, const Params& params) const
+        {
+            if (params.mSink <= 0.f)
                 return 0.f;
-            return params.mSink * gap;
+            return params.mSink * restingGap(halfExtents, shape, yaw, worldUp());
+        }
+
+        // Plane through terrain heights sampled at the footprint's front, back, right and left
+        // edges. Unlike the physics contact normal, which follows whichever terrain triangle the
+        // hull edge touches this frame, it varies continuously as the actor walks.
+        static osg::Vec3f footprintNormal(const osg::Vec3f& forward, const osg::Vec3f& right, float halfLength,
+            float halfWidth, float front, float back, float rightZ, float leftZ)
+        {
+            const osg::Vec3f along = forward * (2.f * halfLength) + osg::Vec3f(0.f, 0.f, front - back);
+            const osg::Vec3f across = right * (2.f * halfWidth) + osg::Vec3f(0.f, 0.f, rightZ - leftZ);
+            osg::Vec3f normal = across ^ along;
+            if (normal.z() < 0.f)
+                normal = -normal;
+            if (!std::isfinite(normal.x()) || !std::isfinite(normal.y()) || !std::isfinite(normal.z())
+                || normal.normalize() < 0.0001f)
+                return osg::Vec3f(0.f, 0.f, 1.f);
+            return normal;
         }
 
         osg::Vec3f worldUp() const { return mWorldTilt * osg::Vec3f(0.f, 0.f, 1.f); }

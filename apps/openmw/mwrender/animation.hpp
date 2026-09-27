@@ -500,6 +500,7 @@ namespace MWRender
             osg::Vec3f mNormal; // support normal sampled this frame (world space)
             osg::Vec3f mUp; // smoothed rendered up direction (world space)
             float mSinkOffset = 0.f; // units the model is currently lowered by
+            bool mOnTerrain = false; // pose fitted to terrain under the footprint, not the contact
         };
         virtual std::optional<GroundAlignmentState> getGroundAlignment() const { return std::nullopt; }
         virtual bool setGroundAlignment(const SceneUtil::CreatureSlope::Params& params) { return false; }

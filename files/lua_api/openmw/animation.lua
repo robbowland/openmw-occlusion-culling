@@ -225,7 +225,9 @@
 --   * `maxSupport` - a number of degrees, 0 to 60; steeper support normals are ignored (default: 45)
 --   * `responsiveness` - a number per second, 0.1 to 60, of the exponential pose approach (default: 10)
 --   * `sink` - a number 0 to 2; the fraction of the upright collision shape's slope gap to lower
---     the model by, so it meets the slope instead of hovering (default: 0)
+--     the model by, so it meets the slope instead of hovering (default: 0). On exterior terrain the
+--     gap is measured under the origin and the lean follows a plane fitted to the footprint; on
+--     statics and in interiors both come from the physics contact.
 -- @return #boolean true if the actor has a slope pose
 -- @usage animation.setGroundAlignment(self, { sink = 1, maxLean = 20 })
 
@@ -234,7 +236,8 @@
 -- @function [parent=#animation] getGroundAlignment
 -- @param openmw.core#GameObject actor
 -- @return #table `enabled`, `maxLean`, `maxSupport`, `responsiveness`, `sink`, plus `normal` (support
--- normal this frame), `up` (smoothed rendered up direction) and `sinkOffset` (units lowered)
+-- normal this frame), `up` (smoothed rendered up direction), `sinkOffset` (units lowered) and
+-- `onTerrain` (true when the pose is fitted to terrain rather than the physics contact)
 
 ---
 -- Get the current active animation for a bone group

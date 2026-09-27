@@ -285,6 +285,7 @@ namespace MWLua
             result["normal"] = state->mNormal;
             result["up"] = state->mUp;
             result["sinkOffset"] = state->mSinkOffset;
+            result["onTerrain"] = state->mOnTerrain;
             return result;
         };
 
