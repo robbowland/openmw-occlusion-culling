@@ -1,5 +1,10 @@
 #include "animationbindings.hpp"
 
+#include <algorithm>
+#include <cmath>
+
+#include <osg/Math>
+
 #include <components/lua/luastate.hpp>
 #include <components/lua/utilpackage.hpp>
 #include <components/misc/finitevalues.hpp>
@@ -239,6 +244,48 @@ namespace MWLua
         api["hasBone"] = [](const LObject& object, std::string_view bonename) -> bool {
             const MWRender::Animation* anim = getConstAnimationOrThrow(object);
             return anim->getNode(bonename) != nullptr;
+        };
+
+        // Creature ground (slope) alignment. Options are validated here and applied on the main
+        // thread; returns false for actors without a slope transform (setting off or ineligible).
+        api["setGroundAlignment"] = [context](const SelfObject& object, const sol::table& options) -> bool {
+            const MWRender::Animation* current = getConstAnimationOrThrow(object);
+            const auto state = current->getGroundAlignment();
+            if (!state)
+                return false;
+            SceneUtil::CreatureSlope::Params params = state->mParams;
+            if (auto enabled = options.get<sol::optional<bool>>("enabled"))
+                params.mEnabled = *enabled;
+            if (auto maxLean = options.get<sol::optional<Misc::FiniteFloat>>("maxLean"))
+                params.mMaxLean = osg::DegreesToRadians(std::clamp(static_cast<float>(*maxLean), 0.f, 45.f));
+            if (auto maxSupport = options.get<sol::optional<Misc::FiniteFloat>>("maxSupport"))
+                params.mMinSupportZ
+                    = std::cos(osg::DegreesToRadians(std::clamp(static_cast<float>(*maxSupport), 0.f, 60.f)));
+            if (auto responsiveness = options.get<sol::optional<Misc::FiniteFloat>>("responsiveness"))
+                params.mResponsiveness = std::clamp(static_cast<float>(*responsiveness), 0.1f, 60.f);
+            if (auto sink = options.get<sol::optional<Misc::FiniteFloat>>("sink"))
+                params.mSink = std::clamp(static_cast<float>(*sink), 0.f, 2.f);
+            context.mLuaManager->addAction(
+                [object = Object(object), params] { getMutableAnimationOrThrow(object)->setGroundAlignment(params); },
+                "setGroundAlignmentAction");
+            return true;
+        };
+
+        api["getGroundAlignment"] = [](sol::this_state lua, const LObject& object) -> sol::object {
+            const auto state = getConstAnimationOrThrow(object)->getGroundAlignment();
+            if (!state)
+                return sol::nil;
+            sol::table result(lua, sol::create);
+            result["enabled"] = state->mParams.mEnabled;
+            result["maxLean"] = osg::RadiansToDegrees(state->mParams.mMaxLean);
+            result["maxSupport"]
+                = osg::RadiansToDegrees(std::acos(std::clamp(state->mParams.mMinSupportZ, -1.f, 1.f)));
+            result["responsiveness"] = state->mParams.mResponsiveness;
+            result["sink"] = state->mParams.mSink;
+            result["normal"] = state->mNormal;
+            result["up"] = state->mUp;
+            result["sinkOffset"] = state->mSinkOffset;
+            return result;
         };
 
         api["addGlow"] = [context](const SelfObject& object, const sol::table& options) {

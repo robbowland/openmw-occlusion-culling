@@ -24,10 +24,16 @@ namespace MWRender
         osg::Vec3f runAnimation(float duration) override;
         void removeFromScene() override;
 
+        std::optional<GroundAlignmentState> getGroundAlignment() const override;
+        bool setGroundAlignment(const SceneUtil::CreatureSlope::Params& params) override;
+
     private:
         osg::ref_ptr<osg::Group> mSlopeParent;
         osg::ref_ptr<osg::MatrixTransform> mSlopeTransform;
         SceneUtil::CreatureSlope mSlope;
+        SceneUtil::CreatureSlope::Params mSlopeParams;
+        osg::Vec3f mSlopeNormal{ 0.f, 0.f, 1.f };
+        float mSlopeSink = 0.f;
         osg::Vec3f mPreviousSlopePosition;
         bool mSlopeDebug = false;
         float mSlopeLogTimer = 0.f;

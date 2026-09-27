@@ -211,6 +211,32 @@
 -- @return #boolean 
 
 ---
+-- Set visual ground (slope) alignment parameters for a creature. Only walking, non-bipedal,
+-- non-flying creatures with `[Game] creature slope alignment` enabled have a slope pose; for any
+-- other actor this does nothing and returns false. Omitted fields keep their current values.
+-- Changes are applied on the next frame and last until the actor's animation is rebuilt, so
+-- scripts should reapply them in onActive.
+-- @function [parent=#animation] setGroundAlignment
+-- @param openmw.core#GameObject actor
+-- @param #table options A table of optional fields:
+--
+--   * `enabled` - a boolean; false returns the model upright (default: true)
+--   * `maxLean` - a number of degrees, 0 to 45, capping the visible lean (default: 25)
+--   * `maxSupport` - a number of degrees, 0 to 60; steeper support normals are ignored (default: 45)
+--   * `responsiveness` - a number per second, 0.1 to 60, of the exponential pose approach (default: 10)
+--   * `sink` - a number 0 to 2; the fraction of the upright collision shape's slope gap to lower
+--     the model by, so it meets the slope instead of hovering (default: 0)
+-- @return #boolean true if the actor has a slope pose
+-- @usage animation.setGroundAlignment(self, { sink = 1, maxLean = 20 })
+
+---
+-- Get a creature's ground alignment parameters and current pose, or nil if it has no slope pose.
+-- @function [parent=#animation] getGroundAlignment
+-- @param openmw.core#GameObject actor
+-- @return #table `enabled`, `maxLean`, `maxSupport`, `responsiveness`, `sink`, plus `normal` (support
+-- normal this frame), `up` (smoothed rendered up direction) and `sinkOffset` (units lowered)
+
+---
 -- Get the current active animation for a bone group
 -- @function [parent=#animation] getActiveGroup
 -- @param openmw.core#GameObject actor

@@ -19,6 +19,22 @@
 
 namespace MWRender
 {
+    namespace
+    {
+        SceneUtil::CreatureSlope::Shape slopeShape()
+        {
+            switch (Settings::game().mActorCollisionShapeType)
+            {
+                case DetourNavigator::CollisionShapeType::RotatingBox:
+                    return SceneUtil::CreatureSlope::Shape::RotatingBox;
+                case DetourNavigator::CollisionShapeType::Cylinder:
+                    return SceneUtil::CreatureSlope::Shape::Cylinder;
+                case DetourNavigator::CollisionShapeType::Aabb:
+                    break;
+            }
+            return SceneUtil::CreatureSlope::Shape::Aabb;
+        }
+    }
 
     CreatureAnimation::CreatureAnimation(
         const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem, bool animated)
@@ -73,9 +89,15 @@ namespace MWRender
                 mSlope.reset();
             mPreviousSlopePosition = position.asVec3();
             const osg::Quat yaw(position.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
-            const osg::Vec3f normal = MWBase::Environment::get().getWorld()->getActorVisualGroundNormal(mPtr);
-            const osg::Quat tilt = mSlope.update(normal, yaw, duration);
-            mSlopeTransform->setMatrix(osg::Matrix::rotate(tilt));
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            const osg::Vec3f normal = world->getActorVisualGroundNormal(mPtr);
+            const osg::Quat tilt = mSlope.update(normal, yaw, duration, mSlopeParams);
+            mSlopeNormal = normal;
+            // Physics lookup only when a Lua policy asked for sink; the default costs nothing extra.
+            mSlopeSink = mSlopeParams.mSink > 0.f
+                ? mSlope.sinkOffset(world->getHalfExtents(mPtr), slopeShape(), yaw, mSlopeParams)
+                : 0.f;
+            mSlopeTransform->setMatrix(osg::Matrix::rotate(tilt) * osg::Matrix::translate(0.f, 0.f, -mSlopeSink));
             if (mSlopeDebug && duration > 0.f)
             {
                 mSlopeLogTimer += duration;
@@ -86,11 +108,27 @@ namespace MWRender
                     Log(Debug::Info) << "SLOPE_POSE id=" << mPtr.getCellRef().getRefId()
                         << " pos=" << position.pos[0] << "," << position.pos[1] << "," << position.pos[2]
                         << " normal=" << normal.x() << "," << normal.y() << "," << normal.z()
-                        << " renderedUp=" << renderedUp.x() << "," << renderedUp.y() << "," << renderedUp.z();
+                        << " renderedUp=" << renderedUp.x() << "," << renderedUp.y() << "," << renderedUp.z()
+                        << " sink=" << mSlopeSink;
                 }
             }
         }
         return movement;
+    }
+
+    std::optional<Animation::GroundAlignmentState> CreatureAnimation::getGroundAlignment() const
+    {
+        if (!mSlopeTransform)
+            return std::nullopt;
+        return GroundAlignmentState{ mSlopeParams, mSlopeNormal, mSlope.worldUp(), mSlopeSink };
+    }
+
+    bool CreatureAnimation::setGroundAlignment(const SceneUtil::CreatureSlope::Params& params)
+    {
+        if (!mSlopeTransform)
+            return false;
+        mSlopeParams = params;
+        return true;
     }
 
     CreatureWeaponAnimation::CreatureWeaponAnimation(

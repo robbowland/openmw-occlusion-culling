@@ -11,6 +11,7 @@
 
 #include <components/misc/strings/algorithm.hpp>
 #include <components/sceneutil/animblendrules.hpp>
+#include <components/sceneutil/creatureslope.hpp>
 #include <components/sceneutil/controller.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/textkeymap.hpp>
@@ -490,6 +491,18 @@ namespace MWRender
         virtual float getBodyPitchRadians() const { return mBodyPitchRadians; }
 
         virtual void setAccurateAiming(bool enabled) {}
+
+        // Visual ground alignment (creature slope pose). Only animations that own a slope
+        // transform report state; others return nothing and ignore parameters.
+        struct GroundAlignmentState
+        {
+            SceneUtil::CreatureSlope::Params mParams;
+            osg::Vec3f mNormal; // support normal sampled this frame (world space)
+            osg::Vec3f mUp; // smoothed rendered up direction (world space)
+            float mSinkOffset = 0.f; // units the model is currently lowered by
+        };
+        virtual std::optional<GroundAlignmentState> getGroundAlignment() const { return std::nullopt; }
+        virtual bool setGroundAlignment(const SceneUtil::CreatureSlope::Params& params) { return false; }
         virtual bool canBeHarvested() const { return false; }
         virtual void harvest(const MWWorld::Ptr& ptr) {}
 
