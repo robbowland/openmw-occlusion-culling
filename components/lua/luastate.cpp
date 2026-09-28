@@ -31,7 +31,13 @@ namespace LuaUtil
         struct ScriptTiming
         {
             std::mutex mMutex;
-            std::unordered_map<int, std::pair<std::chrono::steady_clock::duration, uint64_t>> mByScript;
+            struct Entry
+            {
+                std::chrono::steady_clock::duration mTotal{};
+                std::chrono::steady_clock::duration mMax{};
+                uint64_t mCalls = 0;
+            };
+            std::unordered_map<int, Entry> mByScript;
             unsigned mReports = 0;
         };
 
@@ -53,8 +59,9 @@ namespace LuaUtil
         ScriptTiming& timing = scriptTiming();
         std::lock_guard lock(timing.mMutex);
         auto& entry = timing.mByScript[configIndex];
-        entry.first += elapsed;
-        ++entry.second;
+        entry.mTotal += elapsed;
+        entry.mMax = std::max(entry.mMax, elapsed);
+        ++entry.mCalls;
     }
 
     void reportScriptTiming(const ScriptsConfiguration& configuration)
@@ -68,8 +75,8 @@ namespace LuaUtil
         std::chrono::steady_clock::duration total{};
         for (const auto& [index, entry] : timing.mByScript)
         {
-            sorted.emplace_back(entry.first, index);
-            total += entry.first;
+            sorted.emplace_back(entry.mTotal, index);
+            total += entry.mTotal;
         }
         std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
         const auto ms = [&](std::chrono::steady_clock::duration d) {
@@ -79,8 +86,10 @@ namespace LuaUtil
         for (size_t i = 0; i < sorted.size() && i < 30; ++i)
         {
             const auto& [elapsed, index] = sorted[i];
+            const auto& entry = timing.mByScript[index];
             Log(Debug::Info) << "LUA_TIMING " << ms(elapsed) << " ms/frame calls/frame="
-                             << static_cast<double>(timing.mByScript[index].second) / timing.mReports << " "
+                             << static_cast<double>(entry.mCalls) / timing.mReports << " maxCallMs="
+                             << std::chrono::duration<double, std::milli>(entry.mMax).count() << " "
                              << configuration[index].mScriptPath.value();
         }
         timing.mByScript.clear();

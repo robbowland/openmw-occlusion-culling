@@ -855,6 +855,7 @@ MWShadowTechnique::MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::C
     _shadowUpdateInterval = vdsm._shadowUpdateInterval;
     _shadowReuseMaxAge = vdsm._shadowReuseMaxAge;
     _shadowSmallFeatureCullingPixelSize = vdsm._shadowSmallFeatureCullingPixelSize;
+    _staggerShadowUpdates = vdsm._staggerShadowUpdates;
     _frustumExpansionBase = vdsm._frustumExpansionBase;
     _frustumExpansionPerSkip = vdsm._frustumExpansionPerSkip;
 }
@@ -1182,7 +1183,13 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     // in single-threaded rendering where that slot alternates.
     const auto* frameStamp = cv.getFrameStamp();
     const double currentTime = frameStamp ? frameStamp->getReferenceTime() : 0.0;
-    if (!_customFrustumCallback && !_debugHud && frameStamp && vdd->numValidShadows() > 0
+    // Staggered mode renders one shadow map per frame (round robin) instead of reusing all of
+    // them for several frames and then rendering all at once, which evens out frame times.
+    const bool stagger = _staggerShadowUpdates && _shadowUpdateInterval > 1 && !_customFrustumCallback && !_debugHud
+        && frameStamp;
+    const bool canReuseMaps = stagger && vdd->numValidShadows() > 0 && vdd->_shadowRevision == _shadowRevision
+        && vdd->_reuseProjection == viewProjectionMatrix;
+    if (!stagger && !_customFrustumCallback && !_debugHud && frameStamp && vdd->numValidShadows() > 0
         && vdd->_shadowRevision == _shadowRevision && vdd->_reuseProjection == viewProjectionMatrix
         && vdd->_shadowReuse.reuse(_shadowUpdateInterval, currentTime, _shadowReuseMaxAge))
     {
@@ -1446,6 +1453,23 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                 if (!debug)
                     sd->updateTextureSize();
             }
+
+            if (canReuseMaps && sd->_lastRenderTime >= 0.0
+                && sm_i != frameStamp->getFrameNumber() % numShadowMapsPerLight
+                && currentTime - sd->_lastRenderTime <= _shadowReuseMaxAge)
+            {
+                // Keep this map's previous texture and matrices for this frame.
+                assignValidRegionMatrix(cv, sd->_validRegionViewProjection, sm_i, vddUniforms);
+                assignShadowStateSettings(cv, sd->_camera, sm_i, vddUniforms);
+                pl.textureUnits.push_back(textureUnit);
+                sd->_textureUnit = textureUnit;
+                sd->_sm_i = sm_i;
+                sdl.push_back(sd);
+                ++textureUnit;
+                ++numValidShadows;
+                continue;
+            }
+            sd->_lastRenderTime = currentTime;
 
             osg::ref_ptr<osg::Camera> camera = sd->_camera;
 

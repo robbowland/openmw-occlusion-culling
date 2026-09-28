@@ -326,6 +326,8 @@ namespace MWRender
             const int bufW = Settings::camera().mOcclusionBufferWidth;
             const int bufH = Settings::camera().mOcclusionBufferHeight;
             mOcclusionCuller = new SceneUtil::OcclusionCuller(bufW, bufH);
+            mOcclusionCuller->setMeshBuildBudget(
+                static_cast<unsigned int>(Settings::camera().mOcclusionOccluderBuildsPerFrame.get()));
 
             const float cellWorldSize = Constants::CellSizeInUnits;
             mTerrainOccluder = std::make_unique<Terrain::TerrainOccluder>(mTerrainStorage.get(), cellWorldSize);

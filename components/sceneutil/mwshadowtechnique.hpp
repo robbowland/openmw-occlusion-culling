@@ -207,6 +207,8 @@ namespace SceneUtil {
             // Before perspective adjustment; needed to remap a reused cascade
             // into the current eye space (including the other uniform slot).
             osg::Matrixd                       _validRegionViewProjection;
+            // Staggered updates: when this map's texture was last rendered (-1 = never).
+            double                             _lastRenderTime = -1.0;
         };
 
         typedef std::list< osg::ref_ptr<ShadowData> > ShadowDataList;
@@ -287,6 +289,7 @@ namespace SceneUtil {
         void setShadowReuseMaxAge(double seconds) { _shadowReuseMaxAge = seconds; }
         void setShadowSmallFeatureCullingPixelSize(float pixels) { _shadowSmallFeatureCullingPixelSize = pixels; }
         float getShadowSmallFeatureCullingPixelSize() const { return _shadowSmallFeatureCullingPixelSize; }
+        void setStaggerShadowUpdates(bool stagger) { _staggerShadowUpdates = stagger; }
         void setFrustumExpansion(double base, double perSkip)
         {
             _frustumExpansionBase = base;
@@ -338,6 +341,7 @@ namespace SceneUtil {
         unsigned int                            _shadowUpdateInterval = 1;
         double                                  _shadowReuseMaxAge = 0.040;
         float                                   _shadowSmallFeatureCullingPixelSize = 0.f;
+        bool                                    _staggerShadowUpdates = false;
         unsigned int                            _shadowRevision = 1;
         double                                  _frustumExpansionBase = 0.0;
         double                                  _frustumExpansionPerSkip = 0.0;

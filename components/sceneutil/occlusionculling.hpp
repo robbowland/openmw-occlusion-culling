@@ -47,6 +47,18 @@ namespace SceneUtil
         bool isFrameActive() const { return mFrameActive; }
         void endFrame() { mFrameActive = false; }
 
+        /// Occluder-mesh build budget for the current frame; false once it is spent.
+        void setMeshBuildBudget(unsigned int perFrame) { mMeshBuildBudget = perFrame; }
+        bool consumeMeshBuild()
+        {
+            if (mMeshBuildBudget == 0)
+                return true;
+            if (mMeshBuildsThisFrame >= mMeshBuildBudget)
+                return false;
+            ++mMeshBuildsThisFrame;
+            return true;
+        }
+
         unsigned int getNumOccluded() const { return mNumOccluded; }
         unsigned int getNumTested() const { return mNumTested; }
         unsigned int getNumBuildingOccluders() const { return mNumBuildingOccluders; }
@@ -78,6 +90,8 @@ namespace SceneUtil
         unsigned int mNumBuildingOccluders = 0;
         unsigned int mNumBuildingTris = 0;
         unsigned int mNumBuildingVerts = 0;
+        unsigned int mMeshBuildBudget = 0;
+        unsigned int mMeshBuildsThisFrame = 0;
     };
 }
 

@@ -13,6 +13,7 @@
 #include <osg/Geometry>
 #include <osg/Group>
 #include <osg/NodeVisitor>
+#include <osg/PositionAttitudeTransform>
 #include <osg/Transform>
 #include <osgUtil/CullVisitor>
 #include <osgUtil/RenderStage>
@@ -25,6 +26,7 @@
 #include <components/debug/debuglog.hpp>
 #include <components/misc/constants.hpp>
 #include <components/sceneutil/occlusionculling.hpp>
+#include <components/settings/values.hpp>
 #include <components/terrain/terrainoccluder.hpp>
 
 #include "vismask.hpp"
@@ -612,14 +614,39 @@ namespace MWRender
         , mOccluderMaxDistanceSq(occluderMaxDistance * occluderMaxDistance)
         , mEnableStaticOccluders(enableStaticOccluders)
         , mMaxTriangles(maxTriangles)
+        , mCullLargeObjects(Settings::camera().mOcclusionCullLargeObjects)
     {
     }
 
-    const OccluderMesh& CellOcclusionCallback::getOccluderMesh(osg::Node* node)
+    namespace
     {
+        const osg::PositionAttitudeTransform* asPat(const osg::Node* node)
+        {
+            const osg::Transform* transform = node->asTransform();
+            return transform ? transform->asPositionAttitudeTransform() : nullptr;
+        }
+    }
+
+    const OccluderMesh* CellOcclusionCallback::getOccluderMesh(osg::Node* node)
+    {
+        const osg::PositionAttitudeTransform* pat = asPat(node);
         auto it = mMeshCache.find(node);
         if (it != mMeshCache.end())
-            return it->second;
+        {
+            CachedMesh& cached = it->second;
+            if (cached.mNode.get() == node)
+            {
+                // Meshes are world-space; an object that has moved since (e.g. an animated boat)
+                // would leave its occluder behind, so it stops being an occluder altogether.
+                if (!cached.mMoved && pat
+                    && (pat->getPosition() != cached.mPosition || pat->getAttitude() != cached.mAttitude))
+                    cached.mMoved = true;
+                return cached.mMoved ? nullptr : &cached.mMesh;
+            }
+            mMeshCache.erase(it); // freed node, address reused by a new object
+        }
+        if (!mCuller->consumeMeshBuild())
+            return nullptr;
 
         int meshRes = mOccluderMeshResolution;
         float radius = node->getBound().radius();
@@ -641,7 +668,43 @@ namespace MWRender
                                 << " tris=" << (mesh.indices.size() / 3) << " sphere=" << node->getBound().radius();
         }
 
-        return mMeshCache.emplace(node, std::move(mesh)).first->second;
+        CachedMesh cached;
+        cached.mNode = node;
+        if (pat)
+        {
+            cached.mPosition = pat->getPosition();
+            cached.mAttitude = pat->getAttitude();
+        }
+        cached.mMesh = std::move(mesh);
+        return &mMeshCache.insert_or_assign(node, std::move(cached)).first->second.mMesh;
+    }
+
+    void CellOcclusionCallback::rasterizeLargeOccluder(
+        osg::Node* child, const OccluderMesh& mesh, osgUtil::CullVisitor* cv)
+    {
+        // Rasterize as occluder if in range and camera is not inside the building.
+        // Test against terrain-only buffer so other buildings don't prevent rasterization
+        // of adjacent buildings (which would reduce culling coverage for Pass 2).
+        if (!mesh.aabb.valid() || !mEnableStaticOccluders || mesh.indices.empty()
+            || !mCuller->testVisibleAABBTerrainOnly(mesh.aabb))
+            return;
+        const osg::BoundingSphere& bs = child->getBound();
+        if ((bs.center() - cv->getEyePoint()).length2() >= mOccluderMaxDistanceSq)
+            return;
+        osg::Vec3f center = mesh.aabb.center();
+        osg::Vec3f halfExtent
+            = (osg::Vec3f(mesh.aabb.xMax(), mesh.aabb.yMax(), mesh.aabb.zMax()) - center) * mOccluderInsideThreshold;
+        osg::BoundingBox scaledBB;
+        scaledBB.expandBy(center - halfExtent);
+        scaledBB.expandBy(center + halfExtent);
+        if (scaledBB.contains(cv->getEyePoint()))
+            return;
+        unsigned int newTris = static_cast<unsigned int>(mesh.indices.size() / 3);
+        if (mMaxTriangles == 0 || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
+        {
+            mCuller->rasterizeOccluder(mesh.vertices, mesh.indices);
+            mCuller->incrementBuildingOccluders(newTris, static_cast<unsigned int>(mesh.vertices.size()));
+        }
     }
 
     void CellOcclusionCallback::operator()(osg::Group* node, osgUtil::CullVisitor* cv)
@@ -713,43 +776,18 @@ namespace MWRender
                 // geometry that should only be culled by terrain, not adjacent buildings.
                 osg::BoundingBox pageBB;
                 pageBB.expandBy(bs);
-                if (mCuller->testVisibleAABBTerrainOnly(pageBB))
+                if (mCullLargeObjects ? mCuller->testVisibleAABB(pageBB) : mCuller->testVisibleAABBTerrainOnly(pageBB))
                     child->accept(*cv);
                 continue;
             }
 
             // Get cached occluder mesh (with AABB for visibility test)
-            const OccluderMesh& mesh = getOccluderMesh(child);
+            const OccluderMesh* mesh = getOccluderMesh(child);
+            if (mesh)
+                rasterizeLargeOccluder(child, *mesh, cv);
 
-            // Rasterize as occluder if in range and camera is not inside the building.
-            // Test against terrain-only buffer so other buildings don't prevent rasterization
-            // of adjacent buildings (which would reduce culling coverage for Pass 2).
-            if (mesh.aabb.valid() && mEnableStaticOccluders && !mesh.indices.empty()
-                && mCuller->testVisibleAABBTerrainOnly(mesh.aabb))
-            {
-                float distSq = (bs.center() - cv->getEyePoint()).length2();
-                if (distSq < mOccluderMaxDistanceSq)
-                {
-                    osg::Vec3f center = mesh.aabb.center();
-                    osg::Vec3f halfExtent
-                        = (osg::Vec3f(mesh.aabb.xMax(), mesh.aabb.yMax(), mesh.aabb.zMax()) - center)
-                        * mOccluderInsideThreshold;
-                    osg::BoundingBox scaledBB;
-                    scaledBB.expandBy(center - halfExtent);
-                    scaledBB.expandBy(center + halfExtent);
-                    if (!scaledBB.contains(cv->getEyePoint()))
-                    {
-                        unsigned int newTris = static_cast<unsigned int>(mesh.indices.size() / 3);
-                        if (mMaxTriangles == 0
-                            || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
-                        {
-                            mCuller->rasterizeOccluder(mesh.vertices, mesh.indices);
-                            mCuller->incrementBuildingOccluders(
-                                newTris, static_cast<unsigned int>(mesh.vertices.size()));
-                        }
-                    }
-                }
-            }
+            if (mCullLargeObjects)
+                continue; // traversed after every large occluder in this cell is rasterized
 
             // Always traverse large buildings. Do NOT gate traversal on testVisibleAABB —
             // buildings testing against a buffer that includes previously rasterized
@@ -758,6 +796,24 @@ namespace MWRender
             // are correctly culled by PVS and the cell-level AABB test above; MSOC
             // is reserved for culling small objects in Pass 2.
             child->accept(*cv);
+        }
+
+        // Pass 1b (occlusion cull large objects): every large occluder in the cell is now in the
+        // buffer, so test each large object against it. An object cannot hide itself (the test
+        // uses its nearest depth), but a simplified mesh can close an arch or doorway.
+        if (mCullLargeObjects)
+        {
+            for (unsigned int i = 0; i < numChildren; ++i)
+            {
+                osg::Node* child = node->getChild(i);
+                const osg::BoundingSphere& bs = child->getBound();
+                if (!bs.valid() || bs.radius() < mOccluderMinRadius || bs.radius() > mOccluderMaxRadius)
+                    continue;
+                osg::BoundingBox childBB;
+                childBB.expandBy(bs);
+                if (mCuller->testVisibleAABB(childBB))
+                    child->accept(*cv);
+            }
         }
 
         // Pass 2: Small objects — test against enriched depth buffer (terrain + buildings)

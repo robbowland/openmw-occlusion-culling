@@ -73,6 +73,7 @@ namespace SceneUtil
         mShadowTechnique->setShadowUpdateInterval(settings.mShadowUpdateInterval);
         mShadowTechnique->setShadowReuseMaxAge(settings.mShadowReuseMaxAge);
         mShadowTechnique->setShadowSmallFeatureCullingPixelSize(settings.mShadowSmallFeatureCullingPixelSize);
+        mShadowTechnique->setStaggerShadowUpdates(settings.mStaggeredShadowUpdates);
         mShadowTechnique->setFrustumExpansion(
             settings.mShadowFrustumExpansionBase, settings.mShadowFrustumExpansionPerSkip);
         mShadowTechnique->invalidateShadowMaps();

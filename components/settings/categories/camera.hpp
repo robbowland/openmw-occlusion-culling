@@ -55,6 +55,9 @@ namespace Settings
         SettingValue<bool> mOcclusionDebugOverlay{ mIndex, "Camera", "occlusion debug overlay" };
         SettingValue<bool> mOcclusionDebugMessages{ mIndex, "Camera", "occlusion debug messages" };
         SettingValue<bool> mOcclusionCullingInteriors{ mIndex, "Camera", "occlusion culling interiors" };
+        SettingValue<bool> mOcclusionCullLargeObjects{ mIndex, "Camera", "occlusion cull large objects" };
+        SettingValue<int> mOcclusionOccluderBuildsPerFrame{ mIndex, "Camera", "occlusion occluder builds per frame",
+            makeClampSanitizerInt(0, 64) };
         SettingValue<int> mOcclusionMaxTriangles{ mIndex, "Camera", "occlusion max triangles",
             makeClampSanitizerInt(0, 500000) };
     };

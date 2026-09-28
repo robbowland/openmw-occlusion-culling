@@ -57,16 +57,22 @@ namespace SceneUtil
         mNumBuildingOccluders = 0;
         mNumBuildingTris = 0;
         mNumBuildingVerts = 0;
+        mMeshBuildsThisFrame = 0;
         mFrameActive = true;
     }
 
     void OcclusionCuller::rasterizeTerrainOccluder(
         const std::vector<osg::Vec3f>& worldPositions, const std::vector<unsigned int>& indices)
     {
-        // Rasterize terrain into both buffers so buildings can be tested against
-        // terrain-only depth (via testVisibleAABBTerrainOnly).
-        rasterizeOccluder(worldPositions, indices);
-        if (!mFrameActive || !mMOCTerrainOnly || worldPositions.empty() || indices.empty())
+        // Terrain goes into both buffers so buildings can be tested against terrain-only
+        // depth (via testVisibleAABBTerrainOnly). Rasterize once into the terrain-only
+        // buffer and merge it into the (freshly cleared) full buffer.
+        if (!mMOCTerrainOnly)
+        {
+            rasterizeOccluder(worldPositions, indices);
+            return;
+        }
+        if (!mFrameActive || worldPositions.empty() || indices.empty())
             return;
 
         const int numTris = static_cast<int>(indices.size()) / 3;
@@ -88,6 +94,7 @@ namespace SceneUtil
         MaskedOcclusionCulling::VertexLayout vtxLayout(12, 4, 8);
         mMOCTerrainOnly->RenderTriangles(reinterpret_cast<const float*>(worldPositions.data()), indices.data(), numTris,
             mVPFloat, MaskedOcclusionCulling::BACKFACE_NONE, MaskedOcclusionCulling::CLIP_PLANE_ALL, vtxLayout);
+        mMOC->MergeBuffer(mMOCTerrainOnly);
     }
 
     void OcclusionCuller::rasterizeOccluder(

@@ -7,6 +7,7 @@
 #include <osg/Object>
 #include <osg/Texture2D>
 #include <osg/Vec3f>
+#include <osg/observer_ptr>
 #include <osg/ref_ptr>
 
 #include <unordered_map>
@@ -146,8 +147,11 @@ namespace MWRender
         void operator()(osg::Group* node, osgUtil::CullVisitor* cv);
 
     private:
-        /// Get cached occluder mesh (actual triangles + AABB) for a node.
-        const OccluderMesh& getOccluderMesh(osg::Node* node);
+        /// Cached occluder mesh (actual triangles + AABB) for a node, or nullptr when the node
+        /// cannot be used as an occluder this frame (moved since it was built, or the per-frame
+        /// build budget is spent and the mesh is not built yet).
+        const OccluderMesh* getOccluderMesh(osg::Node* node);
+        void rasterizeLargeOccluder(osg::Node* child, const OccluderMesh& mesh, osgUtil::CullVisitor* cv);
 
         osg::ref_ptr<SceneUtil::OcclusionCuller> mCuller;
         float mOccluderMinRadius;
@@ -160,7 +164,16 @@ namespace MWRender
         bool mEnableStaticOccluders;
         unsigned int mMaxTriangles;
 
-        std::unordered_map<osg::Node*, OccluderMesh> mMeshCache;
+        struct CachedMesh
+        {
+            osg::observer_ptr<osg::Node> mNode; // detects a freed node whose address was reused
+            osg::Vec3d mPosition;
+            osg::Quat mAttitude;
+            bool mMoved = false; // moved after building: never an occluder (world-space mesh)
+            OccluderMesh mMesh;
+        };
+        std::unordered_map<osg::Node*, CachedMesh> mMeshCache;
+        bool mCullLargeObjects = false;
     };
 }
 
